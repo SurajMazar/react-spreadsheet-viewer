@@ -1,12 +1,20 @@
 import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
+import dts from 'vite-plugin-dts';
 import { resolve } from 'path';
 
 export default defineConfig(({ mode }) => {
   const isLib = mode === 'lib';
 
   return {
-    plugins: [react()],
+    plugins: [
+      react(),
+      isLib && dts({
+        include: ['src/lib/**/*.ts', 'src/lib/**/*.tsx'],
+        outDir: 'dist/types',
+        rollupTypes: true,
+      }),
+    ].filter(Boolean),
     build: isLib
       ? {
           lib: {
