@@ -8,7 +8,9 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [
-      react(),
+      react({
+        jsxRuntime: 'classic',
+      }),
       isLib && dts({
         include: ['src/lib/**/*.ts', 'src/lib/**/*.tsx'],
         outDir: 'dist/types',
@@ -23,7 +25,8 @@ export default defineConfig(({ mode }) => {
             fileName: 'sheet-viewer',
           },
           rollupOptions: {
-            external: ['react', 'react-dom', 'react/jsx-runtime'],
+            external: (id: string) =>
+              /^react($|\/)/.test(id) || /^react-dom($|\/)/.test(id),
             output: {
               globals: {
                 react: 'React',
@@ -49,6 +52,13 @@ export default defineConfig(({ mode }) => {
       globals: true,
       environment: 'jsdom',
       setupFiles: './vitest.setup.ts',
+      server: {
+        deps: {
+          // Force react-chartjs-2 through Vite's transform pipeline
+          // so React 17's CJS jsx-runtime can be resolved properly
+          inline: ['react-chartjs-2'],
+        },
+      },
     },
   };
 });

@@ -1,6 +1,18 @@
+import React from 'react';
 import { describe, it, expect } from 'vitest';
-import { renderHook, waitFor } from '@testing-library/react';
+import { render, waitFor, act } from '@testing-library/react';
 import { useSourceLoader } from '../useSourceLoader';
+
+// Simple renderHook for React 17 (RTL v12 doesn't export renderHook)
+function renderHook<T>(hook: () => T) {
+  const result = { current: null as T };
+  function TestComponent() {
+    result.current = hook();
+    return null;
+  }
+  const utils = render(React.createElement(TestComponent));
+  return { result, ...utils };
+}
 
 describe('useSourceLoader', () => {
   it('returns initial state when no source', () => {

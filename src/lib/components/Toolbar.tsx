@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import { useViewerStore } from '../context/ViewerContext';
 import { colIndexToLetter } from '../utils/rangeParser';
 import { downloadAsXlsx, downloadAsCsv } from '../utils/download';

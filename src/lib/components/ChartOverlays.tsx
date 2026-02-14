@@ -1,4 +1,4 @@
-import { useMemo, type ComponentType } from 'react';
+import React, { useMemo, type ComponentType } from 'react';
 import { Bar, Line, Pie } from 'react-chartjs-2';
 import {
   Chart as ChartJS,

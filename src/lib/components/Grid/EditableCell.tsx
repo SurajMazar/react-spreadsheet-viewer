@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, type CSSProperties, type KeyboardEvent } from 'react';
+import React, { useState, useRef, useEffect, useCallback, type CSSProperties, type KeyboardEvent } from 'react';
 import type { CellValue } from '../../types';
 
 export interface EditableCellProps {

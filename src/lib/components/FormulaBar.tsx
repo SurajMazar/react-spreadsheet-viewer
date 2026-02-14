@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef, type FormEvent, type KeyboardEvent } from 'react';
+import React, { useState, useCallback, useEffect, useRef, type FormEvent, type KeyboardEvent } from 'react';
 import { useViewerStore, EMPTY_SELECTION } from '../context/ViewerContext';
 import { parseRangeExpression, colIndexToLetter } from '../utils/rangeParser';
 

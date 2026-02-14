@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, waitFor, screen } from '@testing-library/react';
-import { createRef } from 'react';
+import React, { createRef } from 'react';
 import { SheetViewer } from '../index';
 import type { SheetViewerHandle } from '../types';
 

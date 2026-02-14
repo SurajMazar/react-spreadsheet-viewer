@@ -1,4 +1,4 @@
-import { memo, type CSSProperties, type MouseEvent } from 'react';
+import React, { memo, type CSSProperties, type MouseEvent } from 'react';
 import { isCellInRanges, getCellBorderInRanges } from '../../utils/rangeParser';
 import type { CellRange, ActiveCell, CellValue, CellStyle } from '../../types';
 

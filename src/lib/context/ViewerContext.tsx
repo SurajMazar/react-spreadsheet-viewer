@@ -1,5 +1,6 @@
-import { createContext, useContext, useRef, type ReactNode } from 'react';
-import { createStore, useStore, type StoreApi } from 'zustand';
+import React, { createContext, useContext, useRef, type ReactNode } from 'react';
+import { createStore, type StoreApi } from 'zustand/vanilla';
+import { useStoreWithEqualityFn } from 'zustand/traditional';
 import type {
   ViewerState,
   SelectionState,
@@ -193,7 +194,7 @@ export function useViewerStore<T>(selector: (state: ViewerState) => T): T {
   if (!store) {
     throw new Error('useViewerStore must be used within a <ViewerProvider>');
   }
-  return useStore(store, selector);
+  return useStoreWithEqualityFn(store, selector);
 }
 
 /**

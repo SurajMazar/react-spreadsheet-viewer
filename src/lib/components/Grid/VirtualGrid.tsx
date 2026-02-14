@@ -1,4 +1,4 @@
-import { useCallback, useRef, useEffect, useState, type MouseEvent } from 'react';
+import React, { useCallback, useRef, useEffect, useState, type MouseEvent } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useViewerStore, EMPTY_SELECTION, EMPTY_RANGES } from '../../context/ViewerContext';
 import { colIndexToLetter } from '../../utils/rangeParser';
@@ -282,7 +282,7 @@ export default function VirtualGrid() {
         >
           {virtualCols.map((vc) => (
             <div
-              key={vc.key}
+              key={String(vc.key)}
               className="sv-col-header"
               style={{
                 position: 'absolute',
@@ -318,7 +318,7 @@ export default function VirtualGrid() {
         >
           {virtualRows.map((vr) => (
             <div
-              key={vr.key}
+              key={String(vr.key)}
               className="sv-row-header"
               style={{
                 position: 'absolute',
