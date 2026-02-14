@@ -46,6 +46,7 @@ function SheetViewerInner({
   onCellChange,
   onSelectionChange,
   downloadable = false,
+  chartable = true,
   searchable = true,
   height = '100%',
   width = '100%',
@@ -90,6 +91,24 @@ function SheetViewerInner({
         s.setSelectionRanges(s.activeSheet, ranges, range);
         s.setRangeInput(s.activeSheet, range);
       }
+    },
+    getCellRangeData: (range: string, sheetName?: string) => {
+      const s = storeApi.getState();
+      const key = sheetName ?? s.activeSheet ?? '';
+      const sheet = s.sheets[key];
+      if (!sheet) return null;
+      const ranges = parseRangeExpression(range, sheet.rows, sheet.cols);
+      if (ranges.length === 0) return null;
+      const r = ranges[0];
+      const result: CellValue[][] = [];
+      for (let row = r.startRow; row <= r.endRow; row++) {
+        const rowData: CellValue[] = [];
+        for (let col = r.startCol; col <= r.endCol; col++) {
+          rowData.push(sheet.data[row]?.[col] ?? null);
+        }
+        result.push(rowData);
+      }
+      return result;
     },
   }));
 
@@ -199,14 +218,14 @@ function SheetViewerInner({
 
       {hasData && (
         <>
-          <Toolbar downloadable={downloadable} />
+          <Toolbar downloadable={downloadable} chartable={chartable} />
           <FormulaBar />
           <div className="sv-main-content">
             <div className="sv-grid-wrapper">
               <VirtualGrid />
               {searchable && <SearchBar />}
             </div>
-            <ChartPanel />
+            {chartable && <ChartPanel />}
           </div>
           <SheetTabs onSheetChange={onSheetChange} />
           <StatusBar />

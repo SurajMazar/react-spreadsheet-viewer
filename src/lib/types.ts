@@ -93,6 +93,8 @@ export interface SheetViewerProps {
   onSelectionChange?: (ranges: CellRange[]) => void;
   /** Show a download button in the toolbar */
   downloadable?: boolean;
+  /** Show the Charts button in the toolbar (default: true) */
+  chartable?: boolean;
   /** Enable Ctrl+F search (default: true) */
   searchable?: boolean;
   /** Container height (CSS value or number of pixels) */
@@ -119,6 +121,8 @@ export interface SheetViewerHandle {
   setActiveSheet(sheetName: string): void;
   /** Programmatically highlight a range */
   setHighlight(range: string): void;
+  /** Get cell values for a range expression (e.g. "A1:D10") from the active or named sheet */
+  getCellRangeData(range: string, sheetName?: string): CellValue[][] | null;
 }
 
 // ============================================================
