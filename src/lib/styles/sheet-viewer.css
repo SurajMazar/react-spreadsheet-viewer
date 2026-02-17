@@ -399,6 +399,7 @@
   color: var(--sv-color-header-text);
   border-right: 1px solid var(--sv-color-border-light);
   user-select: none;
+  overflow: visible;
 }
 
 .sv-row-headers {
@@ -424,42 +425,74 @@
   color: var(--sv-color-header-text);
   border-bottom: 1px solid var(--sv-color-border-light);
   user-select: none;
+  overflow: visible;
 }
 
-/* Column resize handle: thin bar on the right edge of each col header */
+/* Column resize handle: grab zone on the right edge of each col header */
 .sv-col-resize-handle {
   position: absolute;
-  right: 0;
+  right: -3px;
   top: 0;
-  width: 4px;
+  width: 7px;
   height: 100%;
   cursor: col-resize;
-  z-index: 5;
+  z-index: 10;
   background: transparent;
 }
 
-.sv-col-resize-handle:hover,
-.sv-col-resize-handle:active {
-  background: var(--sv-color-primary);
-  opacity: 0.5;
+.sv-col-resize-handle::after {
+  content: '';
+  position: absolute;
+  right: 3px;
+  top: 0;
+  width: 2px;
+  height: 100%;
+  background: transparent;
+  transition: background 0.1s ease;
 }
 
-/* Row resize handle: thin bar on the bottom edge of each row header */
+.sv-col-resize-handle:hover::after,
+.sv-col-resize-handle:active::after {
+  background: var(--sv-color-primary);
+}
+
+/* Row resize handle: grab zone on the bottom edge of each row header */
 .sv-row-resize-handle {
   position: absolute;
-  bottom: 0;
+  bottom: -3px;
   left: 0;
   width: 100%;
-  height: 4px;
+  height: 7px;
   cursor: row-resize;
-  z-index: 5;
+  z-index: 10;
   background: transparent;
 }
 
-.sv-row-resize-handle:hover,
-.sv-row-resize-handle:active {
+.sv-row-resize-handle::after {
+  content: '';
+  position: absolute;
+  bottom: 3px;
+  left: 0;
+  width: 100%;
+  height: 2px;
+  background: transparent;
+  transition: background 0.1s ease;
+}
+
+.sv-row-resize-handle:hover::after,
+.sv-row-resize-handle:active::after {
   background: var(--sv-color-primary);
-  opacity: 0.5;
+}
+
+/* During active resize, lock cursor across the entire grid */
+.sv-grid-container.sv-resizing-col,
+.sv-grid-container.sv-resizing-col * {
+  cursor: col-resize !important;
+}
+
+.sv-grid-container.sv-resizing-row,
+.sv-grid-container.sv-resizing-row * {
+  cursor: row-resize !important;
 }
 
 .sv-grid-scroll {
@@ -513,6 +546,7 @@
   outline-offset: -1px;
   background: var(--sv-color-bg) !important;
   z-index: 5;
+  overflow: visible;
 }
 
 .sv-cell-in-range {
@@ -526,12 +560,23 @@
 .sv-cell-active-in-range {
   background: var(--sv-color-bg) !important;
   z-index: 5;
+  overflow: visible;
 }
 
 .sv-cell-text {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Active cell: expand text to show full content (Google Sheets behavior) */
+.sv-cell-active .sv-cell-text,
+.sv-cell-active-in-range .sv-cell-text {
+  flex-shrink: 0;
+  overflow: visible;
+  text-overflow: clip;
+  background: var(--sv-color-bg);
+  padding-right: 6px;
 }
 
 .sv-cell-text-wrap {

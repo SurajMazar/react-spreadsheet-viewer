@@ -16,6 +16,7 @@ export type {
   ConditionalFormatRuleType,
   MergeCell,
   SelectionState,
+  UndoEntry,
   ValidationRule,
   ValidationRuleType,
 } from './types';

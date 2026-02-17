@@ -22,6 +22,7 @@ A high-performance React component for viewing and editing Excel and CSV files w
 - **Download** — export the current data as `.xlsx` or `.csv`
 - **Charts from selection** — select a data range and create bar, line, pie, or area charts dynamically
 - **Copy & paste with formatting** — Ctrl+C/V with both HTML (preserving styles) and TSV clipboard formats
+- **Undo/redo** — Ctrl+Z and Ctrl+Y (or Ctrl+Shift+Z) for cell edits and paste
 - **Column/row resize** — drag column and row header edges to resize
 - **Merged cells** — visually renders merged cell ranges from Excel files
 - **Text wrapping** — cells with `wrapText` style render multi-line content
@@ -30,6 +31,7 @@ A high-performance React component for viewing and editing Excel and CSV files w
 - **Data validation** — input validation with dropdown lists, number/date ranges, and error UI
 - **Formula engine** — parse and evaluate Excel-style formulas (24 built-in functions: SUM, IF, VLOOKUP, etc.)
 - **Imperative API** — access sheet data, navigate sheets, resize columns, manage comments, and more via ref
+- **Large cell content** — active cell expands to show full text (Google Sheets-style); inactive cells truncate with ellipsis
 - **Instance isolation** — multiple `<SheetViewer />` components on the same page are fully independent
 - **Nested container support** — horizontal trackpad/mouse scrolling works in nested scrollable containers
 - **Zero global styles** — all CSS scoped under `.sheet-viewer` with `sv-` prefixed classes
@@ -169,6 +171,10 @@ function App() {
 | `setRowHeight(row, height, name?)` | `void` | Set row height in pixels (min 20px) |
 | `getCellComment(cellRef, name?)` | `CellComment \| null` | Get comment for a cell (e.g. `"A1"`) |
 | `setCellComment(cellRef, text, author?, name?)` | `void` | Set or remove a cell comment |
+| `undo()` | `void` | Undo the last cell edit or paste |
+| `redo()` | `void` | Redo the last undone edit |
+| `canUndo()` | `boolean` | Whether undo is available |
+| `canRedo()` | `boolean` | Whether redo is available |
 
 ---
 
@@ -194,6 +200,7 @@ import type {
   ConditionalFormatRuleType,
   MergeCell,
   SelectionState,
+  UndoEntry,
   ValidationRule,
   ValidationRuleType,
 } from 'rc-sheet-viewer-17';
@@ -270,6 +277,22 @@ The component supports Excel-compatible clipboard operations with style preserva
 - **Escape** — clears the marching ants copy indicator
 
 No additional configuration needed. Copy works in both view and edit modes; paste requires `mode="edit"`.
+
+## Large Cell Content
+
+When a cell contains long text, inactive cells show truncated content with ellipsis. When you select a cell (click it), the full content expands to display—similar to Google Sheets. The formula bar always shows the complete value.
+
+## Undo & Redo
+
+- **Ctrl+Z** (Cmd+Z on Mac) — undo the last cell edit or paste
+- **Ctrl+Y** or **Ctrl+Shift+Z** — redo
+
+Also available programmatically:
+
+```tsx
+if (ref.current?.canUndo()) ref.current.undo();
+if (ref.current?.canRedo()) ref.current.redo();
+```
 
 ## Column & Row Resizing
 

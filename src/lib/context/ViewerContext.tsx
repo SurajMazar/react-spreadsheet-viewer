@@ -11,6 +11,7 @@ import type {
   ChartOverlay,
   SheetViewerMode,
   CellRange,
+  UndoEntry,
 } from '../types';
 
 /**
@@ -54,6 +55,10 @@ function createViewerStore(): StoreApi<ViewerState> {
     showChartPanel: false,
     chartType: 'bar',
     copiedRange: null,
+
+    // Undo / Redo
+    undoStack: [],
+    redoStack: [],
 
     // Mode
     mode: 'view' as SheetViewerMode,
@@ -136,13 +141,26 @@ function createViewerStore(): StoreApi<ViewerState> {
       const state = get();
       const sheet = state.sheets[sheetName];
       if (!sheet) return;
-      const newData = sheet.data.map((r, ri) =>
-        ri === row ? r.map((c, ci) => (ci === col ? value : c)) : r
-      );
+
+      // Extend data array to accommodate the target cell if needed
+      const newData = sheet.data.map((r) => [...r]);
+      while (newData.length <= row) {
+        newData.push([]);
+      }
+      const targetRow = [...newData[row]];
+      while (targetRow.length <= col) {
+        targetRow.push(null);
+      }
+      targetRow[col] = value;
+      newData[row] = targetRow;
+
+      const newRows = Math.max(sheet.rows, row + 1);
+      const newCols = Math.max(sheet.cols, col + 1);
+
       set({
         sheets: {
           ...state.sheets,
-          [sheetName]: { ...sheet, data: newData },
+          [sheetName]: { ...sheet, data: newData, rows: newRows, cols: newCols },
         },
       });
     },
@@ -222,6 +240,86 @@ function createViewerStore(): StoreApi<ViewerState> {
       return state.sheets[state.activeSheet];
     },
 
+    pushUndo: (entry: UndoEntry) => {
+      const state = get();
+      const MAX_UNDO = 100;
+      const newStack = [...state.undoStack, entry];
+      if (newStack.length > MAX_UNDO) newStack.shift();
+      set({ undoStack: newStack, redoStack: [] });
+    },
+
+    undo: () => {
+      const state = get();
+      if (state.undoStack.length === 0) return;
+      const entry = state.undoStack[state.undoStack.length - 1];
+      const sheet = state.sheets[entry.sheetName];
+      if (!sheet) return;
+
+      // Reverse value changes
+      const newData = sheet.data.map((r) => [...r]);
+      for (const ch of entry.cellChanges) {
+        while (newData.length <= ch.row) newData.push([]);
+        while (newData[ch.row].length <= ch.col) newData[ch.row].push(null);
+        newData[ch.row][ch.col] = ch.oldValue;
+      }
+
+      // Reverse style changes
+      const newStyles = { ...(sheet.styles || {}) };
+      for (const ch of entry.styleChanges) {
+        const key = `${ch.row},${ch.col}`;
+        if (ch.oldStyle === undefined) {
+          delete newStyles[key];
+        } else {
+          newStyles[key] = ch.oldStyle;
+        }
+      }
+
+      set({
+        undoStack: state.undoStack.slice(0, -1),
+        redoStack: [...state.redoStack, entry],
+        sheets: {
+          ...state.sheets,
+          [entry.sheetName]: { ...sheet, data: newData, styles: newStyles },
+        },
+      });
+    },
+
+    redo: () => {
+      const state = get();
+      if (state.redoStack.length === 0) return;
+      const entry = state.redoStack[state.redoStack.length - 1];
+      const sheet = state.sheets[entry.sheetName];
+      if (!sheet) return;
+
+      // Re-apply value changes
+      const newData = sheet.data.map((r) => [...r]);
+      for (const ch of entry.cellChanges) {
+        while (newData.length <= ch.row) newData.push([]);
+        while (newData[ch.row].length <= ch.col) newData[ch.row].push(null);
+        newData[ch.row][ch.col] = ch.newValue;
+      }
+
+      // Re-apply style changes
+      const newStyles = { ...(sheet.styles || {}) };
+      for (const ch of entry.styleChanges) {
+        const key = `${ch.row},${ch.col}`;
+        if (ch.newStyle === undefined) {
+          delete newStyles[key];
+        } else {
+          newStyles[key] = ch.newStyle;
+        }
+      }
+
+      set({
+        redoStack: state.redoStack.slice(0, -1),
+        undoStack: [...state.undoStack, entry],
+        sheets: {
+          ...state.sheets,
+          [entry.sheetName]: { ...sheet, data: newData, styles: newStyles },
+        },
+      });
+    },
+
     reset: () =>
       set({
         fileName: null,
@@ -238,6 +336,8 @@ function createViewerStore(): StoreApi<ViewerState> {
         activeCell: null,
         showChartPanel: false,
         copiedRange: null,
+        undoStack: [],
+        redoStack: [],
       }),
   }));
 }

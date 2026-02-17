@@ -1,4 +1,4 @@
-import React, { useEffect, forwardRef, useImperativeHandle, type Ref } from 'react';
+    import React, { useEffect, forwardRef, useImperativeHandle, type Ref } from 'react';
 import { ViewerProvider, useViewerStore, useViewerStoreApi } from './context/ViewerContext';
 import { useSourceLoader } from './hooks/useSourceLoader';
 import { useFileParser } from './hooks/useFileParser';
@@ -147,6 +147,10 @@ function SheetViewerInner({
       const key = sheetName ?? s.activeSheet ?? '';
       if (key) s.setRowHeight(key, rowIndex, height);
     },
+    undo: () => storeApi.getState().undo(),
+    redo: () => storeApi.getState().redo(),
+    canUndo: () => storeApi.getState().undoStack.length > 0,
+    canRedo: () => storeApi.getState().redoStack.length > 0,
     getSelectedRangeData: () => {
       const s = storeApi.getState();
       if (!s.activeSheet) return null;
