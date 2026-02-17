@@ -10,7 +10,7 @@ import SheetTabs from './components/SheetTabs';
 import StatusBar from './components/StatusBar';
 import ChartPanel from './components/ChartPanel';
 import SearchBar from './components/SearchBar';
-import type { SheetViewerProps, SheetViewerHandle, SheetViewerMode, CellValue } from './types';
+import type { SheetViewerProps, SheetViewerHandle, SheetViewerMode, CellValue, CellComment } from './types';
 import './styles/sheet-viewer.css';
 
 /**
@@ -100,6 +100,61 @@ function SheetViewerInner({
       const ranges = parseRangeExpression(range, sheet.rows, sheet.cols);
       if (ranges.length === 0) return null;
       const r = ranges[0];
+      const result: CellValue[][] = [];
+      for (let row = r.startRow; row <= r.endRow; row++) {
+        const rowData: CellValue[] = [];
+        for (let col = r.startCol; col <= r.endCol; col++) {
+          rowData.push(sheet.data[row]?.[col] ?? null);
+        }
+        result.push(rowData);
+      }
+      return result;
+    },
+    getCellComment: (cellRef: string, sheetName?: string) => {
+      const s = storeApi.getState();
+      const key = sheetName ?? s.activeSheet ?? '';
+      const sheet = s.sheets[key];
+      if (!sheet) return null;
+      const ranges = parseRangeExpression(cellRef, sheet.rows, sheet.cols);
+      if (ranges.length === 0) return null;
+      const r = ranges[0];
+      const commentKey = `${r.startRow},${r.startCol}`;
+      return sheet.comments?.[commentKey] ?? null;
+    },
+    setCellComment: (cellRef: string, text: string | null, author?: string, sheetName?: string) => {
+      const s = storeApi.getState();
+      const key = sheetName ?? s.activeSheet ?? '';
+      const sheet = s.sheets[key];
+      if (!sheet || !key) return;
+      const ranges = parseRangeExpression(cellRef, sheet.rows, sheet.cols);
+      if (ranges.length === 0) return;
+      const r = ranges[0];
+      if (text === null) {
+        s.setCellComment(key, r.startRow, r.startCol, null);
+      } else {
+        const comment: CellComment = { text };
+        if (author) comment.author = author;
+        s.setCellComment(key, r.startRow, r.startCol, comment);
+      }
+    },
+    setColumnWidth: (colIndex: number, width: number, sheetName?: string) => {
+      const s = storeApi.getState();
+      const key = sheetName ?? s.activeSheet ?? '';
+      if (key) s.setColumnWidth(key, colIndex, width);
+    },
+    setRowHeight: (rowIndex: number, height: number, sheetName?: string) => {
+      const s = storeApi.getState();
+      const key = sheetName ?? s.activeSheet ?? '';
+      if (key) s.setRowHeight(key, rowIndex, height);
+    },
+    getSelectedRangeData: () => {
+      const s = storeApi.getState();
+      if (!s.activeSheet) return null;
+      const sel = s.selections[s.activeSheet];
+      if (!sel || sel.ranges.length === 0) return null;
+      const sheet = s.sheets[s.activeSheet];
+      if (!sheet) return null;
+      const r = sel.ranges[0];
       const result: CellValue[][] = [];
       for (let row = r.startRow; row <= r.endRow; row++) {
         const rowData: CellValue[] = [];

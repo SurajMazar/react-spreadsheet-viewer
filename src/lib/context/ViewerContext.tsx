@@ -6,6 +6,8 @@ import type {
   SelectionState,
   SheetData,
   CellValue,
+  CellStyle,
+  CellComment,
   ChartOverlay,
   SheetViewerMode,
   CellRange,
@@ -51,6 +53,7 @@ function createViewerStore(): StoreApi<ViewerState> {
     // UI state
     showChartPanel: false,
     chartType: 'bar',
+    copiedRange: null,
 
     // Mode
     mode: 'view' as SheetViewerMode,
@@ -146,6 +149,71 @@ function createViewerStore(): StoreApi<ViewerState> {
 
     toggleChartPanel: () => set((s) => ({ showChartPanel: !s.showChartPanel })),
     setChartType: (chartType: string) => set({ chartType }),
+    setCopiedRange: (range: CellRange | null) => set({ copiedRange: range }),
+
+    setColumnWidth: (sheetName: string, colIndex: number, width: number) => {
+      const state = get();
+      const sheet = state.sheets[sheetName];
+      if (!sheet) return;
+      const newWidths = [...(sheet.colWidths || [])];
+      // Extend array if needed
+      while (newWidths.length <= colIndex) newWidths.push(100);
+      newWidths[colIndex] = Math.max(30, width); // 30px minimum
+      set({ sheets: { ...state.sheets, [sheetName]: { ...sheet, colWidths: newWidths } } });
+    },
+
+    setRowHeight: (sheetName: string, rowIndex: number, height: number) => {
+      const state = get();
+      const sheet = state.sheets[sheetName];
+      if (!sheet) return;
+      const newHeights = [...(sheet.rowHeights || [])];
+      while (newHeights.length <= rowIndex) newHeights.push(26); // default ROW_HEIGHT
+      newHeights[rowIndex] = Math.max(20, height); // 20px minimum
+      set({ sheets: { ...state.sheets, [sheetName]: { ...sheet, rowHeights: newHeights } } });
+    },
+
+    setCellComment: (sheetName: string, row: number, col: number, comment: CellComment | null) => {
+      const state = get();
+      const sheet = state.sheets[sheetName];
+      if (!sheet) return;
+      const key = `${row},${col}`;
+      const prevComments = sheet.comments || {};
+      let newComments: Record<string, CellComment>;
+      if (comment === null) {
+        const { [key]: _removed, ...rest } = prevComments;
+        newComments = rest;
+      } else {
+        newComments = { ...prevComments, [key]: comment };
+      }
+      set({ sheets: { ...state.sheets, [sheetName]: { ...sheet, comments: newComments } } });
+    },
+
+    setCellStyle: (sheetName: string, row: number, col: number, style: CellStyle | null) => {
+      const state = get();
+      const sheet = state.sheets[sheetName];
+      if (!sheet) return;
+      const key = `${row},${col}`;
+      const prevStyles = sheet.styles || {};
+      let newStyles: Record<string, CellStyle>;
+      if (style === null) {
+        // Remove the style entry
+        const { [key]: _removed, ...rest } = prevStyles;
+        newStyles = rest;
+      } else {
+        // Merge with any existing style
+        newStyles = {
+          ...prevStyles,
+          [key]: { ...(prevStyles[key] || {}), ...style },
+        };
+      }
+      set({
+        sheets: {
+          ...state.sheets,
+          [sheetName]: { ...sheet, styles: newStyles },
+        },
+      });
+    },
+
     setMode: (mode: SheetViewerMode) => set({ mode }),
 
     getCurrentSheetData: (): SheetData | null => {
@@ -169,6 +237,7 @@ function createViewerStore(): StoreApi<ViewerState> {
         selections: {},
         activeCell: null,
         showChartPanel: false,
+        copiedRange: null,
       }),
   }));
 }

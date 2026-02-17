@@ -12,8 +12,16 @@ export interface SheetData {
   cols: number;
   merges: MergeCell[];
   colWidths: number[];
+  /** Per-row heights. Sparse: only rows with custom heights are set. Default is ROW_HEIGHT (26). */
+  rowHeights?: number[];
   /** Sparse map of cell styles keyed by "row,col" (e.g. "0,0" = A1). Only cells with non-default styles are stored. */
   styles?: Record<string, CellStyle>;
+  /** Sparse map of cell comments keyed by "row,col". */
+  comments?: Record<string, CellComment>;
+  /** Conditional formatting rules for the sheet */
+  conditionalFormats?: ConditionalFormatRule[];
+  /** Sparse map of data validation rules keyed by "row,col" */
+  validations?: Record<string, ValidationRule>;
 }
 
 /** Style information for a single cell */
@@ -24,6 +32,62 @@ export interface CellStyle {
   italic?: boolean;
   fontSize?: number;
   textAlign?: 'left' | 'center' | 'right';
+  wrapText?: boolean;
+}
+
+/** A cell comment */
+export interface CellComment {
+  author?: string;
+  text: string;
+}
+
+/** Conditional formatting rule types */
+export type ConditionalFormatRuleType =
+  | 'greaterThan'
+  | 'lessThan'
+  | 'between'
+  | 'equalTo'
+  | 'textContains'
+  | 'top10'
+  | 'bottom10'
+  | 'colorScale'
+  | 'dataBar'
+  | 'iconSet';
+
+/** A conditional formatting rule applied to a range */
+export interface ConditionalFormatRule {
+  type: ConditionalFormatRuleType;
+  range: CellRange;
+  /** Threshold value(s) for comparison rules */
+  values?: (number | string)[];
+  /** Styles to apply when rule matches (for comparison rules) */
+  style?: CellStyle;
+  /** Color scale stops: [minColor, midColor?, maxColor] */
+  colorScale?: string[];
+  /** Data bar color */
+  barColor?: string;
+  /** Whether the rule is a percentage (for top10/bottom10) */
+  percent?: boolean;
+}
+
+/** Data validation rule types */
+export type ValidationRuleType = 'list' | 'number' | 'date' | 'custom';
+
+/** A data validation rule for a cell or range */
+export interface ValidationRule {
+  type: ValidationRuleType;
+  /** For 'list' type: allowed values */
+  listItems?: string[];
+  /** For 'number' type: min value */
+  min?: number;
+  /** For 'number' type: max value */
+  max?: number;
+  /** Whether the rule allows empty values */
+  allowBlank?: boolean;
+  /** Error message to display for invalid input */
+  errorMessage?: string;
+  /** Error title */
+  errorTitle?: string;
 }
 
 /** A merge definition mirroring Excel's merge ranges */
@@ -123,6 +187,16 @@ export interface SheetViewerHandle {
   setHighlight(range: string): void;
   /** Get cell values for a range expression (e.g. "A1:D10") from the active or named sheet */
   getCellRangeData(range: string, sheetName?: string): CellValue[][] | null;
+  /** Get cell values for the currently selected range (drag/mouse selection). Returns null if no range is selected. */
+  getSelectedRangeData(): CellValue[][] | null;
+  /** Programmatically set a column width (in pixels). Minimum 30px. */
+  setColumnWidth(colIndex: number, width: number, sheetName?: string): void;
+  /** Programmatically set a row height (in pixels). Minimum 20px. */
+  setRowHeight(rowIndex: number, height: number, sheetName?: string): void;
+  /** Get a cell comment for the given "A1" or "row,col" key. */
+  getCellComment(cellRef: string, sheetName?: string): CellComment | null;
+  /** Set a cell comment (edit mode). Pass null text to remove. */
+  setCellComment(cellRef: string, text: string | null, author?: string, sheetName?: string): void;
 }
 
 // ============================================================
@@ -156,6 +230,8 @@ export interface ViewerState {
   // UI state
   showChartPanel: boolean;
   chartType: string;
+  /** The range that was last Ctrl+C copied (for marching ants indicator) */
+  copiedRange: CellRange | null;
 
   // Mode
   mode: SheetViewerMode;
@@ -179,6 +255,11 @@ export interface ViewerState {
   setCellValue: (sheetName: string, row: number, col: number, value: CellValue) => void;
   toggleChartPanel: () => void;
   setChartType: (chartType: string) => void;
+  setCopiedRange: (range: CellRange | null) => void;
+  setCellStyle: (sheetName: string, row: number, col: number, style: CellStyle | null) => void;
+  setColumnWidth: (sheetName: string, colIndex: number, width: number) => void;
+  setRowHeight: (sheetName: string, rowIndex: number, height: number) => void;
+  setCellComment: (sheetName: string, row: number, col: number, comment: CellComment | null) => void;
   setMode: (mode: SheetViewerMode) => void;
   getCurrentSheetData: () => SheetData | null;
   reset: () => void;

@@ -6,7 +6,7 @@
 
 ## 1. What This Project Is
 
-**Sheet Viewer** is a reusable React component library that parses and renders Excel (`.xlsx`, `.xls`) and CSV files in a Google Sheets-like UI. It is published on npm as **`rc-sheet-viewer`**. It is designed to:
+**Sheet Viewer** is a reusable React component library that parses and renders Excel (`.xlsx`, `.xls`) and CSV files in a Google Sheets-like UI. It is published on npm as **`rc-sheet-viewer-17`**. It is designed to:
 
 - Handle very large datasets (100k+ rows, 100+ columns) via virtualized rendering.
 - Be embedded in any React application as a drop-in `<SheetViewer />` component.
@@ -19,14 +19,14 @@ The project also includes a **demo application** (with file upload) and **Storyb
 ### Installation (for consumers)
 
 ```bash
-npm install rc-sheet-viewer
+npm install rc-sheet-viewer-17
 # or
-pnpm add rc-sheet-viewer
+pnpm add rc-sheet-viewer-17
 ```
 
 ```tsx
-import { SheetViewer } from 'rc-sheet-viewer';
-import 'rc-sheet-viewer/style.css';
+import { SheetViewer } from 'rc-sheet-viewer-17';
+import 'rc-sheet-viewer-17/style.css';
 ```
 
 Full TypeScript support is included — all props, handle types, and data types are exported.
@@ -45,7 +45,7 @@ Full TypeScript support is included — all props, handle types, and data types 
 | Virtualization | @tanstack/react-virtual 3 | Two `useVirtualizer` instances (rows + columns) |
 | Excel Parsing | xlsx (SheetJS) 0.18 | Dynamic `import()` for code-splitting |
 | CSV Parsing | Custom parser | In `useFileParser.ts`, no external dep for CSV |
-| Charts | Chart.js 4 + react-chartjs-2 5 | Lazy-loaded via `React.lazy`; tree-shakeable; bar, line, pie, area |
+| Charts | Chart.js 4 + react-chartjs-2 5 | Statically imported; tree-shakeable; bar, line, pie, area |
 | ZIP/Decompression | fflate | For reading XLSX internal XML (charts, pivots) |
 | Styling | Plain CSS | All classes prefixed `sv-` or scoped under `.sheet-viewer` |
 | Testing | Vitest 4 + React Testing Library | JSDOM environment |
@@ -81,9 +81,9 @@ sheet-viewer/
 │   │   │   └── useFileParser.ts     # Parses buffer → sheet data (main thread, async)
 │   │   ├── components/
 │   │   │   ├── Grid/
-│   │   │   │   ├── VirtualGrid.tsx  # Virtualized spreadsheet grid (row + col virtualizers)
-│   │   │   │   ├── Cell.tsx         # Read-only cell renderer
-│   │   │   │   └── EditableCell.tsx # Editable cell (edit mode)
+│   │   │   │   ├── VirtualGrid.tsx  # Virtualized spreadsheet grid (row + col virtualizers, resize handles)
+│   │   │   │   ├── Cell.tsx         # Read-only cell renderer (wrapping, comments, conditional formatting)
+│   │   │   │   └── EditableCell.tsx # Editable cell (with data validation: dropdowns, number/date rules)
 │   │   │   ├── Toolbar.tsx          # Top toolbar (download, chart toggle)
 │   │   │   ├── FormulaBar.tsx       # Cell reference input + cell value display
 │   │   │   ├── SheetTabs.tsx        # Bottom sheet tab bar
@@ -91,11 +91,22 @@ sheet-viewer/
 │   │   │   ├── SearchBar.tsx        # Ctrl+F search overlay
 │   │   │   ├── ChartPanel.tsx       # Side panel for creating charts from selection
 │   │   │   └── ChartOverlays.tsx    # Floating chart overlays extracted from Excel
+│   │   ├── formula/                 # Formula engine
+│   │   │   ├── parser.ts           # Tokenizer + recursive descent AST parser
+│   │   │   ├── evaluator.ts        # AST evaluator with cell reference resolution
+│   │   │   ├── functions.ts        # 24 built-in functions (SUM, IF, VLOOKUP, etc.)
+│   │   │   └── index.ts            # Public API
+│   │   ├── conditionalFormat/
+│   │   │   └── evaluator.ts        # Rule evaluator (greaterThan, colorScale, dataBar, etc.)
+│   │   ├── validation/
+│   │   │   └── validator.ts        # Data validation (list, number, date, custom)
 │   │   ├── utils/
 │   │   │   ├── rangeParser.ts       # A1-style reference parsing (A1, A1:B10, A:A, 1:1)
+│   │   │   ├── clipboard.ts         # TSV + HTML copy/paste with style preservation
 │   │   │   ├── download.ts          # Export as XLSX or CSV
 │   │   │   ├── pivotReconstructor.ts # Reconstruct pivot tables from XLSX XML
-│   │   │   └── chartExtractor.ts    # Extract embedded charts from XLSX XML
+│   │   │   ├── chartExtractor.ts    # Extract embedded charts from XLSX XML
+│   │   │   └── styleExtractor.ts    # Extract cell styles from XLSX XML
 │   │   ├── styles/
 │   │   │   └── sheet-viewer.css     # All component styles (CSS custom properties)
 │   │   └── __tests__/
@@ -136,14 +147,16 @@ Zustand Store (ViewerContext)
   │  Holds: sheets, sheetNames, selections, parseState, mode
   ▼
 SheetViewer (component tree)
-  ├── Toolbar
+  ├── Toolbar (conditionally shows Charts button via `chartable` prop)
   ├── FormulaBar
   ├── VirtualGrid (row + col virtualizers from @tanstack/react-virtual)
-  │   ├── Cell / EditableCell
-  │   └── ChartOverlays (lazy — loaded only when chart overlays exist)
-  ├── ChartPanel (lazy — loaded only when chart panel is opened)
+  │   ├── Cell / EditableCell (with merged cell rendering)
+  │   ├── ChartOverlays (floating)
+  │   ├── Keyboard: Ctrl+C/V for clipboard (TSV, Excel-compatible)
+  │   └── Wheel handler: nested-container-safe horizontal scroll
+  ├── ChartPanel (side panel, hidden when chartable=false)
   ├── SearchBar
-  ├── SheetTabs
+  ├── SheetTabs (scrollable with visible scrollbar)
   └── StatusBar
 ```
 
@@ -193,6 +206,7 @@ interface SheetViewerProps {
   onCellChange?: (sheet: string, row: number, col: number, value: CellValue) => void;
   onSelectionChange?: (ranges: CellRange[]) => void;
   downloadable?: boolean;        // Show download button
+  chartable?: boolean;           // Show Charts button in toolbar (default: true)
   searchable?: boolean;          // Enable Ctrl+F search (default: true)
   height?: number | string;      // Container height
   width?: number | string;       // Container width
@@ -211,25 +225,34 @@ interface SheetViewerHandle {
   getActiveSheet(): string | null;
   getAllSheets(): Record<string, SheetData>;
   getFileName(): string | null;
+  getCellRangeData(range: string, sheetName?: string): CellValue[][] | null;
+  getSelectedRangeData(): CellValue[][] | null;
   setActiveSheet(sheetName: string): void;
   setHighlight(range: string): void;
+  setColumnWidth(colIndex: number, width: number, sheetName?: string): void;
+  setRowHeight(rowIndex: number, height: number, sheetName?: string): void;
+  getCellComment(cellRef: string, sheetName?: string): CellComment | null;
+  setCellComment(cellRef: string, text: string | null, author?: string, sheetName?: string): void;
 }
 ```
 
 ### Library Exports (`src/lib/index.ts`)
 
 ```typescript
-export { SheetViewer } from './SheetViewer';     // The component (default re-exported as named)
+export { SheetViewer } from './SheetViewer';
 export type {
   SheetViewerProps, SheetViewerHandle, SheetViewerSource, SheetViewerMode,
-  SheetData, CellRange, CellValue, ChartOverlay, ChartSeries, ChartType,
-  MergeCell, CellStyle, SelectionState,
+  SheetData, CellRange, CellValue, CellComment, CellStyle,
+  ChartOverlay, ChartSeries, ChartType,
+  ConditionalFormatRule, ConditionalFormatRuleType,
+  MergeCell, SelectionState,
+  ValidationRule, ValidationRuleType,
 } from './types';
 ```
 
 **CSS import:** Consumers must also import the stylesheet:
 ```typescript
-import 'rc-sheet-viewer/style.css';
+import 'rc-sheet-viewer-17/style.css';
 ```
 
 ---
@@ -291,11 +314,21 @@ devDependencies:   react, react-dom, vite, ... → Local dev/test only, not ship
 
 ### Unit Tests (Vitest + React Testing Library)
 
-Test files follow the `__tests__/` directory convention next to the code they test:
+Test files follow the `__tests__/` directory convention next to the code they test. **421 tests** across **12 test files**:
 
 - `src/lib/utils/__tests__/rangeParser.test.ts` — 21 tests for cell reference parsing
+- `src/lib/utils/__tests__/clipboard.test.ts` — 42 tests for TSV/HTML serialization, style extraction, and roundtrips
+- `src/lib/utils/__tests__/download.test.ts` — 8 tests for export utilities
 - `src/lib/hooks/__tests__/useSourceLoader.test.ts` — 4 tests for source normalization
-- `src/lib/__tests__/SheetViewer.test.tsx` — 5 integration tests for the component + imperative handle
+- `src/lib/__tests__/SheetViewer.test.tsx` — 28 integration tests for the root component and imperative handle
+- `src/lib/components/Grid/__tests__/Cell.test.tsx` — 42 tests (rendering, selection, merged cells, text wrapping, comments)
+- `src/lib/components/Grid/__tests__/EditableCell.test.tsx` — 14 tests for editable cell
+- `src/lib/context/__tests__/ViewerContext.test.ts` — 41 tests for store actions (including setCellStyle, setColumnWidth, setRowHeight, setCellComment)
+- `src/lib/formula/__tests__/parser.test.ts` — 39 tests for formula tokenizer and parser
+- `src/lib/formula/__tests__/evaluator.test.ts` — 41 tests for formula evaluation and cell resolution
+- `src/lib/formula/__tests__/functions.test.ts` — 94 tests for 24 formula functions (math, logical, text, lookup)
+- `src/lib/validation/__tests__/validator.test.ts` — 27 tests for data validation (list, number, date, custom)
+- `src/lib/conditionalFormat/__tests__/evaluator.test.ts` — 37 tests for conditional format rule evaluation
 
 **Test environment:** JSDOM with polyfills in `vitest.setup.ts`:
 - `ResizeObserver` mock (needed by `@tanstack/react-virtual`)
@@ -351,13 +384,13 @@ The store holds everything: file data, parsing state, selections (per-sheet), UI
 ### React 17 Compatibility
 The library supports React 17, 18, and 19. Key considerations:
 - **Zustand:** Uses `zustand/vanilla` (pure JS store creation) + `zustand/traditional` (React hook with `use-sync-external-store/shim`). Do NOT switch to `useStore` from `zustand` — it uses `React.useSyncExternalStore` which is React 18+ only.
-- **Chart components:** Lazy-loaded via `React.lazy()` + `Suspense`, both available since React 16.6.
 - **No React 18+ APIs:** The library must not use `useId`, `useTransition`, `useDeferredValue`, `useInsertionEffect`, or `startTransition`.
-- **JSX transform:** Uses `"jsx": "react-jsx"` which requires the new JSX transform (available in React 17+).
-- **`@tanstack/react-virtual`:** Does NOT use `useSyncExternalStore`; it uses `useState` + `onChange` internally, so it works with React 17.
+- **JSX transform:** Uses `"jsx": "react"` (classic transform) with explicit `import React from 'react'` in all JSX files. The build uses `jsxRuntime: 'classic'` in `vite.config.ts`.
+- **`@tanstack/react-virtual`:** Does NOT use `useSyncExternalStore`; it uses `useState` + `onChange` internally, so it works with React 17. Virtual item `key` values are wrapped with `String()` because React 17's `Key` type does not include `bigint`.
+- **Testing:** Uses `@testing-library/react@12` (the last version supporting React 17). A custom `renderHook` helper is used for hook tests since v12 does not export `renderHook`. The `react-chartjs-2` package is inlined via `server.deps.inline` in Vitest config to resolve `react/jsx-runtime` imports.
 
-### Lazy-Loaded Chart Components
-`ChartPanel` and `ChartOverlays` are loaded via `React.lazy()` to keep chart.js (~255KB) out of the initial bundle. This is critical for bundle size since many consumers may never use the chart features. The `Suspense` fallback is `null` (invisible loading).
+### Chart Components
+`ChartPanel` and `ChartOverlays` are statically imported. The `chartable` prop (default: `true`) controls whether the Charts button appears in the toolbar. When `chartable={false}`, neither the chart button nor the chart panel renders.
 
 ### CSS Scoping
 All styles are scoped to `.sheet-viewer` or prefixed with `sv-`. The component does not use global styles and should not conflict with host application styles.
@@ -408,7 +441,7 @@ pnpm dev                    # Start demo app at localhost:5173+
 pnpm typecheck              # Must pass with 0 errors
 
 # Testing
-pnpm test                   # Run all 30 tests
+pnpm test                   # Run all 421 tests
 pnpm test:watch             # Watch mode
 
 # Building
@@ -420,8 +453,8 @@ pnpm storybook              # Dev server at localhost:6006
 pnpm build-storybook        # Static build
 pnpm chromatic              # Visual regression (needs CHROMATIC_PROJECT_TOKEN)
 
-# Publishing to npm (as rc-sheet-viewer)
-pnpm build:lib              # Always rebuild before publishing
+# Publishing to npm (as rc-sheet-viewer-17)
+# pnpm build:lib runs automatically via prepublishOnly script
 npm publish --otp=<code>    # Requires 2FA OTP from authenticator app
 ```
 
@@ -431,14 +464,14 @@ npm publish --otp=<code>    # Requires 2FA OTP from authenticator app
 
 | File | Lines | Purpose |
 |---|---|---|
-| `src/lib/types.ts` | ~170 | All shared TypeScript types |
+| `src/lib/types.ts` | ~185 | All shared TypeScript types |
 | `src/lib/index.ts` | ~12 | Public library entry point |
-| `src/lib/SheetViewer.tsx` | ~218 | Root component with forwardRef |
+| `src/lib/SheetViewer.tsx` | ~236 | Root component with forwardRef |
 | `src/lib/context/ViewerContext.tsx` | ~208 | Zustand store + provider |
 | `src/lib/hooks/useSourceLoader.ts` | ~75 | Source → ArrayBuffer normalization |
 | `src/lib/hooks/useFileParser.ts` | ~297 | Buffer → parsed sheet data |
-| `src/lib/components/Grid/VirtualGrid.tsx` | ~432 | Virtualized grid (main render) |
-| `src/lib/components/Grid/Cell.tsx` | ~80 | Read-only cell |
+| `src/lib/components/Grid/VirtualGrid.tsx` | ~550 | Virtualized grid (main render, merge handling, copy/paste, scroll fixes) |
+| `src/lib/components/Grid/Cell.tsx` | ~87 | Read-only cell (with merged cell support) |
 | `src/lib/components/Grid/EditableCell.tsx` | ~90 | Editable cell |
 | `src/lib/components/Toolbar.tsx` | ~50 | Top toolbar |
 | `src/lib/components/FormulaBar.tsx` | ~70 | Formula/range input bar |
@@ -448,10 +481,11 @@ npm publish --otp=<code>    # Requires 2FA OTP from authenticator app
 | `src/lib/components/ChartPanel.tsx` | ~130 | Chart creation panel |
 | `src/lib/components/ChartOverlays.tsx` | ~100 | Floating embedded charts |
 | `src/lib/utils/rangeParser.ts` | ~185 | Excel reference parsing |
+| `src/lib/utils/clipboard.ts` | ~147 | TSV copy/paste utilities for Excel-compatible clipboard |
 | `src/lib/utils/download.ts` | ~60 | XLSX/CSV export |
 | `src/lib/utils/pivotReconstructor.ts` | ~438 | Pivot table reconstruction |
 | `src/lib/utils/chartExtractor.ts` | ~315 | Embedded chart extraction |
-| `src/lib/styles/sheet-viewer.css` | ~900 | All component styles |
+| `src/lib/styles/sheet-viewer.css` | ~923 | All component styles (includes merged cell, selection highlight, sheet tab scrollbar) |
 | `src/demo/DemoApp.tsx` | ~131 | Demo app with file upload |
 | `stories/SheetViewer.stories.tsx` | ~230 | 10 Storybook stories |
 | `vite.config.ts` | ~54 | Build config (dual mode + vite-plugin-dts) |
@@ -465,18 +499,18 @@ npm publish --otp=<code>    # Requires 2FA OTP from authenticator app
 
 | Field | Value |
 |---|---|
-| Package name | `rc-sheet-viewer` |
+| Package name | `rc-sheet-viewer-17` |
 | Registry | https://registry.npmjs.org/ |
 | Entry (ESM) | `./dist/sheet-viewer.js` |
 | Types | `./dist/types/index.d.ts` |
-| CSS | `./dist/sheet-viewer.css` (import as `rc-sheet-viewer/style.css`) |
+| CSS | `./dist/sheet-viewer.css` (import as `rc-sheet-viewer-17/style.css`) |
 | Peer deps | `react` (17, 18, or 19), `react-dom` (17, 18, or 19) |
 | `files` field | `["dist"]` — only the `dist/` directory is included in the tarball |
 
 ### Publishing Checklist
 
 1. Bump version in `package.json`
-2. Run `pnpm build:lib` (generates JS, CSS, and `.d.ts` types)
+2. Run `pnpm build:lib` (generates JS, CSS, and `.d.ts` types — also runs automatically via `prepublishOnly`)
 3. Verify `dist/types/index.d.ts` exists and exports `SheetViewer`
 4. Run `npm publish --otp=<2FA code>` (account requires two-factor auth)
 
@@ -486,10 +520,53 @@ npm publish --otp=<code>    # Requires 2FA OTP from authenticator app
 
 - **No Web Worker parsing** — parsing is main-thread with rAF yields. For truly massive files (500k+ rows), a Worker-based approach may be needed.
 - **No dark mode** — CSS variables are defined but only light theme values exist.
-- **No keyboard navigation** — arrow key cell navigation is not implemented.
-- **No copy/paste** — clipboard integration is not implemented.
-- **No column resize** — column widths come from the file or use the default 100px.
 - **No row/column freeze** — only sticky headers, no user-defined freeze panes.
 - **No sort/filter** — data is displayed as-is from the file.
 - **Image extraction** — SheetJS `!images` support is limited; images may not render for all files.
 - **README.md** — comprehensive; update if the public API changes.
+
+## 16. Recently Added Features
+
+These features were added after the initial release:
+
+### Copy & Paste with Style Preservation
+Full clipboard support writing both HTML (with inline styles) and TSV formats via `navigator.clipboard.write()`. On paste, HTML is preferred (preserving colors, bold, italic); falls back to TSV for plain-text sources. Utility functions in `src/lib/utils/clipboard.ts`.
+
+### Column/Row Resize
+Draggable resize handles on column and row headers. Column handles on the right edge (4px wide, `col-resize` cursor), row handles on the bottom edge (4px tall, `row-resize` cursor). Minimum widths: column 30px, row 20px. Store actions: `setColumnWidth`, `setRowHeight`. Imperative API: `ref.setColumnWidth(col, width)`, `ref.setRowHeight(row, height)`.
+
+### Text Wrapping
+Cells with `wrapText: true` in their `CellStyle` render with `white-space: normal` and word wrapping. The `.sv-cell-text-wrap` CSS class enables multi-line display.
+
+### Cell Comments
+Red triangle indicator in the top-right corner of cells with comments. Hover shows author and text via native `title` attribute. Store action: `setCellComment`. Imperative API: `ref.getCellComment("A1")`, `ref.setCellComment("A1", "text", "author")`. Comment type exported as `CellComment`.
+
+### Conditional Formatting
+Rule-based cell styling evaluated at render time. Supports: `greaterThan`, `lessThan`, `between`, `equalTo`, `textContains`, `top10`, `bottom10`, `colorScale` (2/3-color gradients), `dataBar`. Rules stored in `SheetData.conditionalFormats`. Evaluator in `src/lib/conditionalFormat/evaluator.ts`.
+
+### Data Validation
+Cell input validation with UI feedback. Types: `list` (renders `<select>` dropdown), `number` (min/max range), `date` (range constraints), `custom`. Invalid input shows red border and error tooltip. Rules stored in `SheetData.validations`. Validator in `src/lib/validation/validator.ts`.
+
+### Formula Engine
+Recursive descent parser + evaluator for Excel-style formulas. 24 built-in functions: SUM, AVERAGE, COUNT, COUNTA, MIN, MAX, ABS, SQRT, POWER, ROUND, IF, AND, OR, NOT, CONCATENATE, LEFT, RIGHT, MID, LEN, UPPER, LOWER, TRIM, VLOOKUP, HLOOKUP, INDEX, MATCH. Supports cell references (A1, $A$1), ranges (A1:B10), arithmetic, comparisons, string concatenation, and nested function calls. Source in `src/lib/formula/`.
+
+### Merged Cell Rendering
+Cells that are merged in the source Excel file are rendered as a single visual cell spanning the merged area. Uses a `mergeMap` lookup in `VirtualGrid.tsx`.
+
+### Chartable Prop
+The `chartable` prop (default: `true`) controls visibility of the Charts button in the toolbar and the ChartPanel side panel.
+
+### getCellRangeData Imperative Method
+`ref.current.getCellRangeData('A1:C5')` returns a 2D array of cell values for any Excel-style range. Supports optional `sheetName` parameter.
+
+### Scrollable Sheet Tabs
+The sheet tab bar now has a visible thin scrollbar for workbooks with many sheets.
+
+### Improved Selection Highlight
+Google Sheets-style mutually exclusive selection: active cell outline OR range tint, never both. Marching ants copy indicator.
+
+### Scroll-to-Center for Highlights
+When `highlight` prop is set or `setHighlight` is called, the grid scrolls the range to the center of the viewport.
+
+### Nested Container Horizontal Scroll
+Trackpad/mouse horizontal scrolling works correctly even when the SheetViewer is embedded in nested scrollable containers.
