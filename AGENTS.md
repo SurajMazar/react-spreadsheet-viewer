@@ -233,6 +233,10 @@ interface SheetViewerHandle {
   setRowHeight(rowIndex: number, height: number, sheetName?: string): void;
   getCellComment(cellRef: string, sheetName?: string): CellComment | null;
   setCellComment(cellRef: string, text: string | null, author?: string, sheetName?: string): void;
+  undo(): void;
+  redo(): void;
+  canUndo(): boolean;
+  canRedo(): boolean;
 }
 ```
 
@@ -246,7 +250,7 @@ export type {
   ChartOverlay, ChartSeries, ChartType,
   ConditionalFormatRule, ConditionalFormatRuleType,
   MergeCell, SelectionState,
-  ValidationRule, ValidationRuleType,
+  UndoEntry, ValidationRule, ValidationRuleType,
 } from './types';
 ```
 
@@ -323,7 +327,7 @@ Test files follow the `__tests__/` directory convention next to the code they te
 - `src/lib/__tests__/SheetViewer.test.tsx` — 28 integration tests for the root component and imperative handle
 - `src/lib/components/Grid/__tests__/Cell.test.tsx` — 42 tests (rendering, selection, merged cells, text wrapping, comments)
 - `src/lib/components/Grid/__tests__/EditableCell.test.tsx` — 14 tests for editable cell
-- `src/lib/context/__tests__/ViewerContext.test.ts` — 41 tests for store actions (including setCellStyle, setColumnWidth, setRowHeight, setCellComment)
+- `src/lib/context/__tests__/ViewerContext.test.ts` — 41 tests for store actions (including setCellStyle, setColumnWidth, setRowHeight, setCellComment, undo/redo)
 - `src/lib/formula/__tests__/parser.test.ts` — 39 tests for formula tokenizer and parser
 - `src/lib/formula/__tests__/evaluator.test.ts` — 41 tests for formula evaluation and cell resolution
 - `src/lib/formula/__tests__/functions.test.ts` — 94 tests for 24 formula functions (math, logical, text, lookup)
@@ -533,7 +537,7 @@ These features were added after the initial release:
 Full clipboard support writing both HTML (with inline styles) and TSV formats via `navigator.clipboard.write()`. On paste, HTML is preferred (preserving colors, bold, italic); falls back to TSV for plain-text sources. Utility functions in `src/lib/utils/clipboard.ts`.
 
 ### Column/Row Resize
-Draggable resize handles on column and row headers. Column handles on the right edge (4px wide, `col-resize` cursor), row handles on the bottom edge (4px tall, `row-resize` cursor). Minimum widths: column 30px, row 20px. Store actions: `setColumnWidth`, `setRowHeight`. Imperative API: `ref.setColumnWidth(col, width)`, `ref.setRowHeight(row, height)`.
+Draggable resize handles on column and row headers. Column handles on the right edge (7px grab zone), row handles on the bottom edge (7px grab zone). Minimum widths: column 30px, row 20px. Store actions: `setColumnWidth`, `setRowHeight`. Imperative API: `ref.setColumnWidth(col, width)`, `ref.setRowHeight(row, height)`. Virtualizer cache is invalidated via `measure()` when sizes change. Cursor locks to `col-resize`/`row-resize` during active drag.
 
 ### Text Wrapping
 Cells with `wrapText: true` in their `CellStyle` render with `white-space: normal` and word wrapping. The `.sv-cell-text-wrap` CSS class enables multi-line display.
@@ -570,3 +574,12 @@ When `highlight` prop is set or `setHighlight` is called, the grid scrolls the r
 
 ### Nested Container Horizontal Scroll
 Trackpad/mouse horizontal scrolling works correctly even when the SheetViewer is embedded in nested scrollable containers.
+
+### Undo/Redo
+Ctrl+Z (undo) and Ctrl+Y or Ctrl+Shift+Z (redo) for cell edits and paste operations. Store holds `undoStack` and `redoStack` (max 100 entries). Each entry tracks cell value and style changes per sheet. Imperative API: `ref.undo()`, `ref.redo()`, `ref.canUndo()`, `ref.canRedo()`.
+
+### Empty Cell Edit Fix
+Editing cells beyond the current data bounds (in the extended "Google Sheets-like" empty area) now correctly persists. `setCellValue` extends the data array and updates `rows`/`cols` metadata as needed. Paste into empty areas also works.
+
+### Large Cell Content (Google Sheets Behavior)
+When the active cell has long content, the text expands to show the full value (overflow visible, `flex-shrink: 0` on the text span). Inactive cells remain truncated with ellipsis. The formula bar always shows the full value.

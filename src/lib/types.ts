@@ -197,6 +197,41 @@ export interface SheetViewerHandle {
   getCellComment(cellRef: string, sheetName?: string): CellComment | null;
   /** Set a cell comment (edit mode). Pass null text to remove. */
   setCellComment(cellRef: string, text: string | null, author?: string, sheetName?: string): void;
+  /** Undo the last cell edit (value or style change). */
+  undo(): void;
+  /** Redo the last undone edit. */
+  redo(): void;
+  /** Returns true if there is at least one undoable action. */
+  canUndo(): boolean;
+  /** Returns true if there is at least one redoable action. */
+  canRedo(): boolean;
+}
+
+// ============================================================
+// Undo / Redo
+// ============================================================
+
+/** One cell-level change for undo/redo tracking */
+export interface CellValueChange {
+  row: number;
+  col: number;
+  oldValue: CellValue;
+  newValue: CellValue;
+}
+
+/** One cell-style change for undo/redo tracking */
+export interface CellStyleChange {
+  row: number;
+  col: number;
+  oldStyle: CellStyle | undefined;
+  newStyle: CellStyle | undefined;
+}
+
+/** A single undoable user action (may span multiple cells, e.g. paste) */
+export interface UndoEntry {
+  sheetName: string;
+  cellChanges: CellValueChange[];
+  styleChanges: CellStyleChange[];
 }
 
 // ============================================================
@@ -236,6 +271,10 @@ export interface ViewerState {
   // Mode
   mode: SheetViewerMode;
 
+  // Undo / Redo
+  undoStack: UndoEntry[];
+  redoStack: UndoEntry[];
+
   // Actions
   setParseProgress: (progress: number, status?: string) => void;
   startParsing: () => void;
@@ -262,5 +301,8 @@ export interface ViewerState {
   setCellComment: (sheetName: string, row: number, col: number, comment: CellComment | null) => void;
   setMode: (mode: SheetViewerMode) => void;
   getCurrentSheetData: () => SheetData | null;
+  pushUndo: (entry: UndoEntry) => void;
+  undo: () => void;
+  redo: () => void;
   reset: () => void;
 }

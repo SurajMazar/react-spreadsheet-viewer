@@ -147,6 +147,10 @@ function SheetViewerInner({
       const key = sheetName ?? s.activeSheet ?? '';
       if (key) s.setRowHeight(key, rowIndex, height);
     },
+    undo: () => storeApi.getState().undo(),
+    redo: () => storeApi.getState().redo(),
+    canUndo: () => storeApi.getState().undoStack.length > 0,
+    canRedo: () => storeApi.getState().redoStack.length > 0,
     getSelectedRangeData: () => {
       const s = storeApi.getState();
       if (!s.activeSheet) return null;
