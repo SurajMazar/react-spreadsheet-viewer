@@ -1,13 +1,17 @@
-import { createContext, useContext, useRef, type ReactNode } from 'react';
-import { createStore, useStore, type StoreApi } from 'zustand';
+import React, { createContext, useContext, useRef, type ReactNode } from 'react';
+import { createStore, type StoreApi } from 'zustand/vanilla';
+import { useStoreWithEqualityFn } from 'zustand/traditional';
 import type {
   ViewerState,
   SelectionState,
   SheetData,
   CellValue,
+  CellStyle,
+  CellComment,
   ChartOverlay,
   SheetViewerMode,
   CellRange,
+  UndoEntry,
 } from '../types';
 
 /**
@@ -50,6 +54,11 @@ function createViewerStore(): StoreApi<ViewerState> {
     // UI state
     showChartPanel: false,
     chartType: 'bar',
+    copiedRange: null,
+
+    // Undo / Redo
+    undoStack: [],
+    redoStack: [],
 
     // Mode
     mode: 'view' as SheetViewerMode,
@@ -132,25 +141,183 @@ function createViewerStore(): StoreApi<ViewerState> {
       const state = get();
       const sheet = state.sheets[sheetName];
       if (!sheet) return;
-      const newData = sheet.data.map((r, ri) =>
-        ri === row ? r.map((c, ci) => (ci === col ? value : c)) : r
-      );
+
+      // Extend data array to accommodate the target cell if needed
+      const newData = sheet.data.map((r) => [...r]);
+      while (newData.length <= row) {
+        newData.push([]);
+      }
+      const targetRow = [...newData[row]];
+      while (targetRow.length <= col) {
+        targetRow.push(null);
+      }
+      targetRow[col] = value;
+      newData[row] = targetRow;
+
+      const newRows = Math.max(sheet.rows, row + 1);
+      const newCols = Math.max(sheet.cols, col + 1);
+
       set({
         sheets: {
           ...state.sheets,
-          [sheetName]: { ...sheet, data: newData },
+          [sheetName]: { ...sheet, data: newData, rows: newRows, cols: newCols },
         },
       });
     },
 
     toggleChartPanel: () => set((s) => ({ showChartPanel: !s.showChartPanel })),
     setChartType: (chartType: string) => set({ chartType }),
+    setCopiedRange: (range: CellRange | null) => set({ copiedRange: range }),
+
+    setColumnWidth: (sheetName: string, colIndex: number, width: number) => {
+      const state = get();
+      const sheet = state.sheets[sheetName];
+      if (!sheet) return;
+      const newWidths = [...(sheet.colWidths || [])];
+      // Extend array if needed
+      while (newWidths.length <= colIndex) newWidths.push(100);
+      newWidths[colIndex] = Math.max(30, width); // 30px minimum
+      set({ sheets: { ...state.sheets, [sheetName]: { ...sheet, colWidths: newWidths } } });
+    },
+
+    setRowHeight: (sheetName: string, rowIndex: number, height: number) => {
+      const state = get();
+      const sheet = state.sheets[sheetName];
+      if (!sheet) return;
+      const newHeights = [...(sheet.rowHeights || [])];
+      while (newHeights.length <= rowIndex) newHeights.push(26); // default ROW_HEIGHT
+      newHeights[rowIndex] = Math.max(20, height); // 20px minimum
+      set({ sheets: { ...state.sheets, [sheetName]: { ...sheet, rowHeights: newHeights } } });
+    },
+
+    setCellComment: (sheetName: string, row: number, col: number, comment: CellComment | null) => {
+      const state = get();
+      const sheet = state.sheets[sheetName];
+      if (!sheet) return;
+      const key = `${row},${col}`;
+      const prevComments = sheet.comments || {};
+      let newComments: Record<string, CellComment>;
+      if (comment === null) {
+        const { [key]: _removed, ...rest } = prevComments;
+        newComments = rest;
+      } else {
+        newComments = { ...prevComments, [key]: comment };
+      }
+      set({ sheets: { ...state.sheets, [sheetName]: { ...sheet, comments: newComments } } });
+    },
+
+    setCellStyle: (sheetName: string, row: number, col: number, style: CellStyle | null) => {
+      const state = get();
+      const sheet = state.sheets[sheetName];
+      if (!sheet) return;
+      const key = `${row},${col}`;
+      const prevStyles = sheet.styles || {};
+      let newStyles: Record<string, CellStyle>;
+      if (style === null) {
+        // Remove the style entry
+        const { [key]: _removed, ...rest } = prevStyles;
+        newStyles = rest;
+      } else {
+        // Merge with any existing style
+        newStyles = {
+          ...prevStyles,
+          [key]: { ...(prevStyles[key] || {}), ...style },
+        };
+      }
+      set({
+        sheets: {
+          ...state.sheets,
+          [sheetName]: { ...sheet, styles: newStyles },
+        },
+      });
+    },
+
     setMode: (mode: SheetViewerMode) => set({ mode }),
 
     getCurrentSheetData: (): SheetData | null => {
       const state = get();
       if (!state.activeSheet || !state.sheets[state.activeSheet]) return null;
       return state.sheets[state.activeSheet];
+    },
+
+    pushUndo: (entry: UndoEntry) => {
+      const state = get();
+      const MAX_UNDO = 100;
+      const newStack = [...state.undoStack, entry];
+      if (newStack.length > MAX_UNDO) newStack.shift();
+      set({ undoStack: newStack, redoStack: [] });
+    },
+
+    undo: () => {
+      const state = get();
+      if (state.undoStack.length === 0) return;
+      const entry = state.undoStack[state.undoStack.length - 1];
+      const sheet = state.sheets[entry.sheetName];
+      if (!sheet) return;
+
+      // Reverse value changes
+      const newData = sheet.data.map((r) => [...r]);
+      for (const ch of entry.cellChanges) {
+        while (newData.length <= ch.row) newData.push([]);
+        while (newData[ch.row].length <= ch.col) newData[ch.row].push(null);
+        newData[ch.row][ch.col] = ch.oldValue;
+      }
+
+      // Reverse style changes
+      const newStyles = { ...(sheet.styles || {}) };
+      for (const ch of entry.styleChanges) {
+        const key = `${ch.row},${ch.col}`;
+        if (ch.oldStyle === undefined) {
+          delete newStyles[key];
+        } else {
+          newStyles[key] = ch.oldStyle;
+        }
+      }
+
+      set({
+        undoStack: state.undoStack.slice(0, -1),
+        redoStack: [...state.redoStack, entry],
+        sheets: {
+          ...state.sheets,
+          [entry.sheetName]: { ...sheet, data: newData, styles: newStyles },
+        },
+      });
+    },
+
+    redo: () => {
+      const state = get();
+      if (state.redoStack.length === 0) return;
+      const entry = state.redoStack[state.redoStack.length - 1];
+      const sheet = state.sheets[entry.sheetName];
+      if (!sheet) return;
+
+      // Re-apply value changes
+      const newData = sheet.data.map((r) => [...r]);
+      for (const ch of entry.cellChanges) {
+        while (newData.length <= ch.row) newData.push([]);
+        while (newData[ch.row].length <= ch.col) newData[ch.row].push(null);
+        newData[ch.row][ch.col] = ch.newValue;
+      }
+
+      // Re-apply style changes
+      const newStyles = { ...(sheet.styles || {}) };
+      for (const ch of entry.styleChanges) {
+        const key = `${ch.row},${ch.col}`;
+        if (ch.newStyle === undefined) {
+          delete newStyles[key];
+        } else {
+          newStyles[key] = ch.newStyle;
+        }
+      }
+
+      set({
+        redoStack: state.redoStack.slice(0, -1),
+        undoStack: [...state.undoStack, entry],
+        sheets: {
+          ...state.sheets,
+          [entry.sheetName]: { ...sheet, data: newData, styles: newStyles },
+        },
+      });
     },
 
     reset: () =>
@@ -168,6 +335,9 @@ function createViewerStore(): StoreApi<ViewerState> {
         selections: {},
         activeCell: null,
         showChartPanel: false,
+        copiedRange: null,
+        undoStack: [],
+        redoStack: [],
       }),
   }));
 }
@@ -193,7 +363,7 @@ export function useViewerStore<T>(selector: (state: ViewerState) => T): T {
   if (!store) {
     throw new Error('useViewerStore must be used within a <ViewerProvider>');
   }
-  return useStore(store, selector);
+  return useStoreWithEqualityFn(store, selector);
 }
 
 /**

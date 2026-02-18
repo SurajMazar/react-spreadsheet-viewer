@@ -1,6 +1,6 @@
-import { memo, type CSSProperties, type MouseEvent } from 'react';
+import React, { memo, type CSSProperties, type MouseEvent } from 'react';
 import { isCellInRanges, getCellBorderInRanges } from '../../utils/rangeParser';
-import type { CellRange, ActiveCell, CellValue, CellStyle } from '../../types';
+import type { CellRange, ActiveCell, CellValue, CellStyle, CellComment } from '../../types';
 
 export interface CellProps {
   rowIndex: number;
@@ -9,6 +9,8 @@ export interface CellProps {
   ranges: CellRange[];
   activeCell: ActiveCell | null;
   cellStyle?: CellStyle;
+  comment?: CellComment;
+  isMerged?: boolean;
   onCellClick: (row: number, col: number) => void;
   onCellMouseDown: (e: MouseEvent, row: number, col: number) => void;
   onCellMouseEnter: (e: MouseEvent, row: number, col: number) => void;
@@ -26,6 +28,8 @@ const Cell = memo(function Cell({
   ranges,
   activeCell,
   cellStyle,
+  comment,
+  isMerged,
   onCellClick,
   onCellMouseDown,
   onCellMouseEnter,
@@ -34,16 +38,32 @@ const Cell = memo(function Cell({
 }: CellProps) {
   const isActive =
     activeCell != null && activeCell.row === rowIndex && activeCell.col === columnIndex;
-  const isInRange = ranges.length > 0 && isCellInRanges(rowIndex, columnIndex, ranges);
-  const borders =
-    ranges.length > 0 ? getCellBorderInRanges(rowIndex, columnIndex, ranges) : null;
+  const hasRange = ranges.length > 0;
+  const isInRange = hasRange && isCellInRanges(rowIndex, columnIndex, ranges);
+  const borders = hasRange ? getCellBorderInRanges(rowIndex, columnIndex, ranges) : null;
+
+  // Google Sheets behavior: either single-cell outline OR range highlight, not both.
+  // When a range is active: the anchor cell gets white bg (no outline, no tint).
+  // When no range: the active cell gets the thick blue outline.
+  const showActiveOutline = isActive && (!hasRange || !isInRange);
+  const showInRangeTint = isInRange && !isActive;
+  const showActiveInRange = isActive && isInRange;
 
   let className = 'sv-cell';
-  if (isActive) className += ' sv-cell-active';
-  if (isInRange) className += ' sv-cell-in-range';
+  if (showActiveOutline) className += ' sv-cell-active';
+  if (showInRangeTint) className += ' sv-cell-in-range';
+  if (showActiveInRange) className += ' sv-cell-active-in-range';
+  if (isMerged) className += ' sv-cell-merged';
 
   // Build style object: positioning + selection borders + cell formatting
   const mergedStyle: CSSProperties = { ...style };
+
+  // Merged cells need a z-index so they render above hidden neighbor cells
+  if (isMerged) {
+    mergedStyle.zIndex = 2;
+  }
+
+  const hasWrap = cellStyle?.wrapText;
 
   if (cellStyle) {
     if (cellStyle.bgColor) mergedStyle.backgroundColor = cellStyle.bgColor;
@@ -71,7 +91,10 @@ const Cell = memo(function Cell({
       onDoubleClick={() => onCellDoubleClick?.(rowIndex, columnIndex)}
       title={String(value ?? '')}
     >
-      <span className="sv-cell-text">{value != null ? String(value) : ''}</span>
+      {comment && <div className="sv-comment-indicator" title={`${comment.author ? comment.author + ': ' : ''}${comment.text}`} />}
+      <span className={hasWrap ? 'sv-cell-text sv-cell-text-wrap' : 'sv-cell-text'}>
+        {value != null ? String(value) : ''}
+      </span>
     </div>
   );
 });

@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef, type KeyboardEvent } from 'react';
+import React, { useState, useCallback, useEffect, useRef, type KeyboardEvent } from 'react';
 import { useViewerStore } from '../context/ViewerContext';
 import { colIndexToLetter } from '../utils/rangeParser';
 

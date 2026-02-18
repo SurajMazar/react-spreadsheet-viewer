@@ -399,6 +399,7 @@
   color: var(--sv-color-header-text);
   border-right: 1px solid var(--sv-color-border-light);
   user-select: none;
+  overflow: visible;
 }
 
 .sv-row-headers {
@@ -424,6 +425,74 @@
   color: var(--sv-color-header-text);
   border-bottom: 1px solid var(--sv-color-border-light);
   user-select: none;
+  overflow: visible;
+}
+
+/* Column resize handle: grab zone on the right edge of each col header */
+.sv-col-resize-handle {
+  position: absolute;
+  right: -3px;
+  top: 0;
+  width: 7px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 10;
+  background: transparent;
+}
+
+.sv-col-resize-handle::after {
+  content: '';
+  position: absolute;
+  right: 3px;
+  top: 0;
+  width: 2px;
+  height: 100%;
+  background: transparent;
+  transition: background 0.1s ease;
+}
+
+.sv-col-resize-handle:hover::after,
+.sv-col-resize-handle:active::after {
+  background: var(--sv-color-primary);
+}
+
+/* Row resize handle: grab zone on the bottom edge of each row header */
+.sv-row-resize-handle {
+  position: absolute;
+  bottom: -3px;
+  left: 0;
+  width: 100%;
+  height: 7px;
+  cursor: row-resize;
+  z-index: 10;
+  background: transparent;
+}
+
+.sv-row-resize-handle::after {
+  content: '';
+  position: absolute;
+  bottom: 3px;
+  left: 0;
+  width: 100%;
+  height: 2px;
+  background: transparent;
+  transition: background 0.1s ease;
+}
+
+.sv-row-resize-handle:hover::after,
+.sv-row-resize-handle:active::after {
+  background: var(--sv-color-primary);
+}
+
+/* During active resize, lock cursor across the entire grid */
+.sv-grid-container.sv-resizing-col,
+.sv-grid-container.sv-resizing-col * {
+  cursor: col-resize !important;
+}
+
+.sv-grid-container.sv-resizing-row,
+.sv-grid-container.sv-resizing-row * {
+  cursor: row-resize !important;
 }
 
 .sv-grid-scroll {
@@ -477,6 +546,7 @@
   outline-offset: -1px;
   background: var(--sv-color-bg) !important;
   z-index: 5;
+  overflow: visible;
 }
 
 .sv-cell-in-range {
@@ -487,10 +557,74 @@
   background: rgba(26, 115, 232, 0.14) !important;
 }
 
+.sv-cell-active-in-range {
+  background: var(--sv-color-bg) !important;
+  z-index: 5;
+  overflow: visible;
+}
+
 .sv-cell-text {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Active cell: expand text to show full content (Google Sheets behavior) */
+.sv-cell-active .sv-cell-text,
+.sv-cell-active-in-range .sv-cell-text {
+  flex-shrink: 0;
+  overflow: visible;
+  text-overflow: clip;
+  background: var(--sv-color-bg);
+  padding-right: 6px;
+}
+
+.sv-cell-text-wrap {
+  white-space: normal;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  text-overflow: clip;
+  line-height: 1.3;
+}
+
+/* Comment indicator (red triangle, top-right corner of cells with comments) */
+.sv-comment-indicator {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 0;
+  height: 0;
+  border-style: solid;
+  border-width: 0 8px 8px 0;
+  border-color: transparent #ea4335 transparent transparent;
+  pointer-events: auto;
+  z-index: 3;
+}
+
+/* Copy indicator (marching ants) — a single overlay div over the copied range */
+.sv-copy-indicator {
+  position: absolute;
+  pointer-events: none;
+  z-index: 10;
+  background:
+    linear-gradient(90deg, var(--sv-color-primary) 50%, transparent 50%) repeat-x top left / 8px 2px,
+    linear-gradient(90deg, var(--sv-color-primary) 50%, transparent 50%) repeat-x bottom left / 8px 2px,
+    linear-gradient(0deg, var(--sv-color-primary) 50%, transparent 50%) repeat-y top left / 2px 8px,
+    linear-gradient(0deg, var(--sv-color-primary) 50%, transparent 50%) repeat-y top right / 2px 8px;
+  animation: sv-marching-ants 0.3s linear infinite;
+}
+
+@keyframes sv-marching-ants {
+  0%   { background-position: 0 0, 0 100%, 0 0, 100% 0; }
+  100% { background-position: 8px 0, -8px 100%, 0 -8px, 100% 8px; }
+}
+
+/* Merged cell */
+.sv-cell-merged {
+  z-index: 2;
+  border-right: 1px solid var(--sv-color-border-light);
+  border-bottom: 1px solid var(--sv-color-border-light);
+  background: var(--sv-color-bg);
 }
 
 /* Editable cell */
@@ -509,6 +643,27 @@
   color: var(--sv-color-text);
   background: var(--sv-color-bg);
   box-sizing: border-box;
+}
+
+/* Validation error state */
+.sv-validation-error {
+  border-color: #ea4335 !important;
+  box-shadow: 0 0 0 1px #ea4335 inset;
+}
+
+.sv-validation-tooltip {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 100;
+  padding: 4px 8px;
+  background: #fce8e6;
+  color: #c5221f;
+  font-size: 11px;
+  border-radius: 3px;
+  white-space: nowrap;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  margin-top: 2px;
 }
 
 /* ========================================
@@ -531,11 +686,25 @@
   gap: 2px;
   overflow-x: auto;
   flex: 1;
-  scrollbar-width: none;
+  scrollbar-width: thin;
+  scrollbar-color: #c1c1c1 transparent;
 }
 
 .sv-sheet-tabs-scroll::-webkit-scrollbar {
-  display: none;
+  height: 6px;
+}
+
+.sv-sheet-tabs-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.sv-sheet-tabs-scroll::-webkit-scrollbar-thumb {
+  background: #c1c1c1;
+  border-radius: 3px;
+}
+
+.sv-sheet-tabs-scroll::-webkit-scrollbar-thumb:hover {
+  background: #a8a8a8;
 }
 
 .sv-sheet-tab {

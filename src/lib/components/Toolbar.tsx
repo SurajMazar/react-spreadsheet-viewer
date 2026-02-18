@@ -1,13 +1,14 @@
-import { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import { useViewerStore } from '../context/ViewerContext';
 import { colIndexToLetter } from '../utils/rangeParser';
 import { downloadAsXlsx, downloadAsCsv } from '../utils/download';
 
 export interface ToolbarProps {
   downloadable?: boolean;
+  chartable?: boolean;
 }
 
-export default function Toolbar({ downloadable = false }: ToolbarProps) {
+export default function Toolbar({ downloadable = false, chartable = true }: ToolbarProps) {
   const fileName = useViewerStore((s) => s.fileName);
   const activeCell = useViewerStore((s) => s.activeCell);
   const activeSheet = useViewerStore((s) => s.activeSheet);
@@ -53,18 +54,20 @@ export default function Toolbar({ downloadable = false }: ToolbarProps) {
       <div className="sv-toolbar-center">
         {fileName && (
           <>
-            <button
-              className={`sv-toolbar-btn ${showChartPanel ? 'active' : ''}`}
-              onClick={toggleChartPanel}
-              title="Charts"
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="18" y1="20" x2="18" y2="10" />
-                <line x1="12" y1="20" x2="12" y2="4" />
-                <line x1="6" y1="20" x2="6" y2="14" />
-              </svg>
-              <span>Charts</span>
-            </button>
+            {chartable && (
+              <button
+                className={`sv-toolbar-btn ${showChartPanel ? 'active' : ''}`}
+                onClick={toggleChartPanel}
+                title="Charts"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="18" y1="20" x2="18" y2="10" />
+                  <line x1="12" y1="20" x2="12" y2="4" />
+                  <line x1="6" y1="20" x2="6" y2="14" />
+                </svg>
+                <span>Charts</span>
+              </button>
+            )}
 
             {downloadable && (
               <div style={{ position: 'relative' }} ref={downloadMenuRef}>

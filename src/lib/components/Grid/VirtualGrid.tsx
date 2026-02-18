@@ -1,10 +1,13 @@
-import { useCallback, useRef, useEffect, useState, type MouseEvent } from 'react';
+import React, { useCallback, useRef, useEffect, useState, useMemo, type MouseEvent } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useViewerStore, EMPTY_SELECTION, EMPTY_RANGES } from '../../context/ViewerContext';
 import { colIndexToLetter } from '../../utils/rangeParser';
+import { extractCellsFromRange, extractStylesFromRange, copyRangeToClipboard, pasteFromClipboard } from '../../utils/clipboard';
 import Cell from './Cell';
 import EditableCell from './EditableCell';
 import ChartOverlays from '../ChartOverlays';
+import { evaluateConditionalFormats } from '../../conditionalFormat/evaluator';
+import type { MergeCell, CellStyle, CellValueChange, CellStyleChange } from '../../types';
 
 export const COL_WIDTH = 100;
 export const ROW_HEIGHT = 26;
@@ -24,6 +27,14 @@ export default function VirtualGrid() {
   const setSelectionRanges = useViewerStore((s) => s.setSelectionRanges);
   const setRangeInput = useViewerStore((s) => s.setRangeInput);
   const setCellValue = useViewerStore((s) => s.setCellValue);
+  const setCellStyle = useViewerStore((s) => s.setCellStyle);
+  const setColumnWidth = useViewerStore((s) => s.setColumnWidth);
+  const setRowHeight = useViewerStore((s) => s.setRowHeight);
+  const copiedRange = useViewerStore((s) => s.copiedRange);
+  const setCopiedRange = useViewerStore((s) => s.setCopiedRange);
+  const pushUndo = useViewerStore((s) => s.pushUndo);
+  const undo = useViewerStore((s) => s.undo);
+  const redo = useViewerStore((s) => s.redo);
   const mode = useViewerStore((s) => s.mode);
 
   const currentSelection = useViewerStore(
@@ -63,8 +74,32 @@ export default function VirtualGrid() {
     return () => el.removeEventListener('scroll', onScroll);
   }, []);
 
+  // Horizontal scroll: Shift+wheel and prevent parent scroll capture in nested containers
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+
+    const handleWheel = (e: WheelEvent) => {
+      // Prevent parent containers from capturing horizontal scroll
+      if (Math.abs(e.deltaX) > 0) {
+        e.stopPropagation();
+      }
+
+      // Shift+wheel → horizontal scroll
+      if (e.shiftKey && Math.abs(e.deltaY) > 0) {
+        e.preventDefault();
+        el.scrollLeft += e.deltaY;
+      }
+    };
+
+    el.addEventListener('wheel', handleWheel, { passive: false });
+    return () => el.removeEventListener('wheel', handleWheel);
+  }, []);
+
   const dataCols = sheetData?.cols || 0;
   const dataRows = sheetData?.rows || 0;
+  const colWidths = sheetData?.colWidths;
+  const rowHeights = sheetData?.rowHeights;
 
   // Extend columns and rows beyond data to fill viewport (like Google Sheets)
   const visibleCols = Math.ceil(containerSize.width / COL_WIDTH);
@@ -72,17 +107,27 @@ export default function VirtualGrid() {
   const effectiveCols = Math.max(dataCols, visibleCols + 5);
   const effectiveRows = Math.max(dataRows, visibleRows + 10);
 
+  const getColWidth = useCallback(
+    (index: number) => (colWidths && index < colWidths.length && colWidths[index]) ? colWidths[index] : COL_WIDTH,
+    [colWidths]
+  );
+
+  const getRowHeight = useCallback(
+    (index: number) => (rowHeights && index < rowHeights.length && rowHeights[index]) ? rowHeights[index] : ROW_HEIGHT,
+    [rowHeights]
+  );
+
   const rowVirtualizer = useVirtualizer({
     count: effectiveRows,
     getScrollElement: () => scrollRef.current,
-    estimateSize: () => ROW_HEIGHT,
+    estimateSize: getRowHeight,
     overscan: 8,
   });
 
   const colVirtualizer = useVirtualizer({
     count: effectiveCols,
     getScrollElement: () => scrollRef.current,
-    estimateSize: () => COL_WIDTH,
+    estimateSize: getColWidth,
     horizontal: true,
     overscan: 4,
   });
@@ -93,12 +138,21 @@ export default function VirtualGrid() {
   rowVirtualizerRef.current = rowVirtualizer;
   colVirtualizerRef.current = colVirtualizer;
 
-  // Auto-scroll to selection
+  // Invalidate virtualizer measurement cache when column/row sizes change
+  useEffect(() => {
+    colVirtualizer.measure();
+  }, [colWidths, colVirtualizer]);
+
+  useEffect(() => {
+    rowVirtualizer.measure();
+  }, [rowHeights, rowVirtualizer]);
+
+  // Auto-scroll to selection (center it in viewport)
   useEffect(() => {
     if (ranges.length > 0) {
       const first = ranges[0];
-      rowVirtualizerRef.current.scrollToIndex(first.startRow, { align: 'auto' });
-      colVirtualizerRef.current.scrollToIndex(first.startCol, { align: 'auto' });
+      rowVirtualizerRef.current.scrollToIndex(first.startRow, { align: 'center' });
+      colVirtualizerRef.current.scrollToIndex(first.startCol, { align: 'center' });
     }
   }, [ranges]);
 
@@ -134,11 +188,17 @@ export default function VirtualGrid() {
   const onEditCommit = useCallback(
     (row: number, col: number, value: string) => {
       if (activeSheet) {
+        const oldValue = sheetData?.data?.[row]?.[col] ?? null;
         setCellValue(activeSheet, row, col, value);
+        pushUndo({
+          sheetName: activeSheet,
+          cellChanges: [{ row, col, oldValue, newValue: value }],
+          styleChanges: [],
+        });
       }
       setEditingCell(null);
     },
-    [activeSheet, setCellValue]
+    [activeSheet, setCellValue, sheetData, pushUndo]
   );
 
   const onEditCancel = useCallback(() => {
@@ -249,13 +309,178 @@ export default function VirtualGrid() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [activeCell, sheetData, activeSheet, setActiveCell, setRangeInput, effectiveRows, effectiveCols, dataRows, dataCols, mode, editingCell]);
 
+  // Copy/Paste handlers (Ctrl+C / Ctrl+V / Cmd+C / Cmd+V) and Escape to clear copy indicator
+  useEffect(() => {
+    const handleCopyPaste = (e: globalThis.KeyboardEvent) => {
+      if (!sheetData) return;
+      const target = e.target as HTMLElement;
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return;
+      if (editingCell) return;
+
+      // Escape clears the copy indicator
+      if (e.key === 'Escape') {
+        setCopiedRange(null);
+        return;
+      }
+
+      const isMod = e.ctrlKey || e.metaKey;
+      if (!isMod) return;
+
+      // Undo: Ctrl+Z
+      if (e.key === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        undo();
+        return;
+      }
+
+      // Redo: Ctrl+Y or Ctrl+Shift+Z
+      if (e.key === 'y' || (e.key === 'z' && e.shiftKey) || (e.key === 'Z' && e.shiftKey)) {
+        e.preventDefault();
+        redo();
+        return;
+      }
+
+      if (e.key === 'c') {
+        e.preventDefault();
+        let cellRange;
+        if (ranges.length > 0) {
+          cellRange = ranges[0];
+        } else if (activeCell) {
+          cellRange = {
+            startRow: activeCell.row,
+            startCol: activeCell.col,
+            endRow: activeCell.row,
+            endCol: activeCell.col,
+          };
+        }
+        if (cellRange) {
+          const cells = extractCellsFromRange(cellRange, sheetData);
+          const styles = extractStylesFromRange(cellRange, sheetData);
+          copyRangeToClipboard(cells, styles);
+          setCopiedRange(cellRange);
+        }
+      }
+
+      if (e.key === 'v' && mode === 'edit' && activeCell && activeSheet) {
+        e.preventDefault();
+        setCopiedRange(null);
+        pasteFromClipboard().then((result) => {
+          if (!result || result.values.length === 0) return;
+          const { values, styles: pastedStyles } = result;
+          const cellChanges: CellValueChange[] = [];
+          const styleChanges: CellStyleChange[] = [];
+
+          for (let r = 0; r < values.length; r++) {
+            for (let c = 0; c < values[r].length; c++) {
+              const targetRow = activeCell.row + r;
+              const targetCol = activeCell.col + c;
+
+              const oldValue = sheetData?.data?.[targetRow]?.[targetCol] ?? null;
+              cellChanges.push({ row: targetRow, col: targetCol, oldValue, newValue: values[r][c] });
+              setCellValue(activeSheet, targetRow, targetCol, values[r][c]);
+
+              const pastedStyle = pastedStyles?.[r]?.[c];
+              if (pastedStyle) {
+                const oldStyle = sheetData?.styles?.[`${targetRow},${targetCol}`];
+                styleChanges.push({ row: targetRow, col: targetCol, oldStyle, newStyle: pastedStyle });
+                setCellStyle(activeSheet, targetRow, targetCol, pastedStyle);
+              }
+            }
+          }
+
+          pushUndo({ sheetName: activeSheet, cellChanges, styleChanges });
+        });
+      }
+    };
+
+    window.addEventListener('keydown', handleCopyPaste);
+    return () => window.removeEventListener('keydown', handleCopyPaste);
+  }, [sheetData, activeCell, ranges, mode, activeSheet, editingCell, setCellValue, setCellStyle, setCopiedRange, pushUndo, undo, redo]);
+
+  // Build a merge lookup map: "row,col" → MergeCell for quick cell-level checks
+  const mergeMap = useMemo(() => {
+    const map = new Map<string, { merge: MergeCell; isTopLeft: boolean }>();
+    if (!sheetData?.merges) return map;
+    for (const m of sheetData.merges) {
+      for (let r = m.s.r; r <= m.e.r; r++) {
+        for (let c = m.s.c; c <= m.e.c; c++) {
+          map.set(`${r},${c}`, {
+            merge: m,
+            isTopLeft: r === m.s.r && c === m.s.c,
+          });
+        }
+      }
+    }
+    return map;
+  }, [sheetData?.merges]);
+
+  // Column/Row resize handling
+  const [resizingCol, setResizingCol] = useState<number | null>(null);
+  const [resizingRow, setResizingRow] = useState<number | null>(null);
+  const resizeStartX = useRef(0);
+  const resizeStartY = useRef(0);
+  const resizeStartSize = useRef(0);
+
+  const onColResizeStart = useCallback(
+    (e: MouseEvent, colIndex: number) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setResizingCol(colIndex);
+      resizeStartX.current = e.clientX;
+      resizeStartSize.current = getColWidth(colIndex);
+    },
+    [getColWidth]
+  );
+
+  const onRowResizeStart = useCallback(
+    (e: MouseEvent, rowIndex: number) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setResizingRow(rowIndex);
+      resizeStartY.current = e.clientY;
+      resizeStartSize.current = getRowHeight(rowIndex);
+    },
+    [getRowHeight]
+  );
+
+  useEffect(() => {
+    if (resizingCol === null && resizingRow === null) return;
+
+    const handleMouseMove = (e: globalThis.MouseEvent) => {
+      if (resizingCol !== null && activeSheet) {
+        const delta = e.clientX - resizeStartX.current;
+        const newWidth = Math.max(30, resizeStartSize.current + delta);
+        setColumnWidth(activeSheet, resizingCol, newWidth);
+      }
+      if (resizingRow !== null && activeSheet) {
+        const delta = e.clientY - resizeStartY.current;
+        const newHeight = Math.max(20, resizeStartSize.current + delta);
+        setRowHeight(activeSheet, resizingRow, newHeight);
+      }
+    };
+
+    const handleMouseUp = () => {
+      setResizingCol(null);
+      setResizingRow(null);
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [resizingCol, resizingRow, activeSheet, setColumnWidth, setRowHeight]);
+
   const virtualRows = rowVirtualizer.getVirtualItems();
   const virtualCols = colVirtualizer.getVirtualItems();
 
   if (!sheetData) return null;
 
+  const gridContainerClass = `sv-grid-container${resizingCol !== null ? ' sv-resizing-col' : ''}${resizingRow !== null ? ' sv-resizing-row' : ''}`;
+
   return (
-    <div className="sv-grid-container">
+    <div className={gridContainerClass}>
       {/* Top-left corner */}
       <div
         className="sv-grid-corner"
@@ -282,7 +507,7 @@ export default function VirtualGrid() {
         >
           {virtualCols.map((vc) => (
             <div
-              key={vc.key}
+              key={String(vc.key)}
               className="sv-col-header"
               style={{
                 position: 'absolute',
@@ -293,6 +518,10 @@ export default function VirtualGrid() {
               }}
             >
               {colIndexToLetter(vc.index)}
+              <div
+                className="sv-col-resize-handle"
+                onMouseDown={(e) => onColResizeStart(e, vc.index)}
+              />
             </div>
           ))}
         </div>
@@ -318,7 +547,7 @@ export default function VirtualGrid() {
         >
           {virtualRows.map((vr) => (
             <div
-              key={vr.key}
+              key={String(vr.key)}
               className="sv-row-header"
               style={{
                 position: 'absolute',
@@ -329,6 +558,10 @@ export default function VirtualGrid() {
               }}
             >
               {vr.index + 1}
+              <div
+                className="sv-row-resize-handle"
+                onMouseDown={(e) => onRowResizeStart(e, vr.index)}
+              />
             </div>
           ))}
         </div>
@@ -345,6 +578,8 @@ export default function VirtualGrid() {
           right: 0,
           bottom: 0,
           overflow: 'auto',
+          touchAction: 'pan-x pan-y',
+          overscrollBehavior: 'contain',
         }}
       >
         {/* Sizer div */}
@@ -358,26 +593,47 @@ export default function VirtualGrid() {
           {/* Render visible cells */}
           {virtualRows.map((vr) =>
             virtualCols.map((vc) => {
-              const value = sheetData.data?.[vr.index]?.[vc.index] ?? '';
+              const row = vr.index;
+              const col = vc.index;
+
+              // Check merge status for this cell
+              const mergeInfo = mergeMap.get(`${row},${col}`);
+              if (mergeInfo && !mergeInfo.isTopLeft) {
+                // Cell is hidden by a merge — skip rendering
+                return null;
+              }
+
+              const value = sheetData.data?.[row]?.[col] ?? '';
+
+              // Calculate cell dimensions (may span multiple cells if merged)
+              let cellWidth = vc.size;
+              let cellHeight = vr.size;
+              if (mergeInfo && mergeInfo.isTopLeft) {
+                const m = mergeInfo.merge;
+                cellWidth = (m.e.c - m.s.c + 1) * COL_WIDTH;
+                cellHeight = (m.e.r - m.s.r + 1) * ROW_HEIGHT;
+              }
 
               // Check if this cell is being edited
               if (
                 editingCell &&
-                editingCell.row === vr.index &&
-                editingCell.col === vc.index
+                editingCell.row === row &&
+                editingCell.col === col
               ) {
+                const cellValidation = sheetData.validations?.[`${row},${col}`];
                 return (
                   <EditableCell
                     key={`${vr.key}-${vc.key}`}
-                    row={vr.index}
-                    col={vc.index}
+                    row={row}
+                    col={col}
                     value={value}
+                    validation={cellValidation}
                     style={{
                       position: 'absolute',
                       top: vr.start,
                       left: vc.start,
-                      width: vc.size,
-                      height: vr.size,
+                      width: cellWidth,
+                      height: cellHeight,
                     }}
                     onCommit={onEditCommit}
                     onCancel={onEditCancel}
@@ -385,18 +641,29 @@ export default function VirtualGrid() {
                 );
               }
 
-              // Look up cell style from the parsed styles map
-              const cellStyle = sheetData.styles?.[`${vr.index},${vc.index}`];
+              // Look up cell style, comment, and conditional format
+              let cellStyle = sheetData.styles?.[`${row},${col}`];
+              const cellComment = sheetData.comments?.[`${row},${col}`];
+
+              // Overlay conditional formatting styles (if rules exist)
+              if (sheetData.conditionalFormats && sheetData.conditionalFormats.length > 0) {
+                const cfStyle = evaluateConditionalFormats(row, col, value, sheetData.conditionalFormats, sheetData);
+                if (cfStyle) {
+                  cellStyle = cellStyle ? { ...cellStyle, ...cfStyle } : cfStyle;
+                }
+              }
 
               return (
                 <Cell
                   key={`${vr.key}-${vc.key}`}
-                  rowIndex={vr.index}
-                  columnIndex={vc.index}
+                  rowIndex={row}
+                  columnIndex={col}
                   value={value}
                   ranges={ranges}
                   activeCell={activeCell}
                   cellStyle={cellStyle}
+                  comment={cellComment}
+                  isMerged={!!mergeInfo}
                   onCellClick={onCellClick}
                   onCellMouseDown={onCellMouseDown}
                   onCellMouseEnter={onCellMouseEnter}
@@ -405,14 +672,27 @@ export default function VirtualGrid() {
                     position: 'absolute',
                     top: vr.start,
                     left: vc.start,
-                    width: vc.size,
-                    height: vr.size,
+                    width: cellWidth,
+                    height: cellHeight,
                   }}
                 />
               );
             })
           )}
         </div>
+
+        {/* Marching ants copy indicator */}
+        {copiedRange && (
+          <div
+            className="sv-copy-indicator"
+            style={{
+              top: copiedRange.startRow * ROW_HEIGHT,
+              left: copiedRange.startCol * COL_WIDTH,
+              width: (copiedRange.endCol - copiedRange.startCol + 1) * COL_WIDTH,
+              height: (copiedRange.endRow - copiedRange.startRow + 1) * ROW_HEIGHT,
+            }}
+          />
+        )}
 
         {/* Chart overlays */}
         <div

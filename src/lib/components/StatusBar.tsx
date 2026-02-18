@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import React, { useMemo } from 'react';
 import { useViewerStore, EMPTY_SELECTION } from '../context/ViewerContext';
 
 export default function StatusBar() {

@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, type ComponentType } from 'react';
+import React, { useState, useMemo, useCallback, type ComponentType } from 'react';
 import { Bar, Line, Pie } from 'react-chartjs-2';
 import { useViewerStore, EMPTY_SELECTION } from '../context/ViewerContext';
 import { parseRangeExpression, colIndexToLetter } from '../utils/rangeParser';
