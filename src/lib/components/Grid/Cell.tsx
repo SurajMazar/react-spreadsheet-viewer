@@ -36,21 +36,18 @@ const Cell = memo(function Cell({
   onCellDoubleClick,
   style,
 }: CellProps) {
-  const isActive =
-    activeCell != null && activeCell.row === rowIndex && activeCell.col === columnIndex;
   const hasRange = ranges.length > 0;
   const isInRange = hasRange && isCellInRanges(rowIndex, columnIndex, ranges);
   const borders = hasRange ? getCellBorderInRanges(rowIndex, columnIndex, ranges) : null;
+  const isActive =
+    activeCell != null && activeCell.row === rowIndex && activeCell.col === columnIndex;
 
-  // Google Sheets behavior: either single-cell outline OR range highlight, not both.
-  // When a range is active: the anchor cell gets white bg (no outline, no tint).
-  // When no range: the active cell gets the thick blue outline.
-  const showActiveOutline = isActive && (!hasRange || !isInRange);
+  // Only range selection is rendered visually — no single-cell outline.
+  // The anchor cell inside a range gets a white bg (no tint).
   const showInRangeTint = isInRange && !isActive;
   const showActiveInRange = isActive && isInRange;
 
   let className = 'sv-cell';
-  if (showActiveOutline) className += ' sv-cell-active';
   if (showInRangeTint) className += ' sv-cell-in-range';
   if (showActiveInRange) className += ' sv-cell-active-in-range';
   if (isMerged) className += ' sv-cell-merged';

@@ -1,4 +1,4 @@
-    import React, { useEffect, forwardRef, useImperativeHandle, type Ref } from 'react';
+import React, { useEffect, useRef as useReactRef, forwardRef, useImperativeHandle, type Ref } from 'react';
 import { ViewerProvider, useViewerStore, useViewerStoreApi } from './context/ViewerContext';
 import { useSourceLoader } from './hooks/useSourceLoader';
 import { useFileParser } from './hooks/useFileParser';
@@ -71,6 +71,9 @@ function SheetViewerInner({
   const sheetData = useViewerStore((s) => (s.activeSheet ? s.sheets[s.activeSheet] : null));
   const setMode = useViewerStore((s) => s.setMode);
 
+  // Flag to suppress onSelectionChange for silent setHighlight calls
+  const suppressSelectionCb = useReactRef(false);
+
   // Expose imperative handle via ref
   useImperativeHandle(forwardedRef, () => ({
     getSheetNames: () => storeApi.getState().sheetNames,
@@ -83,15 +86,17 @@ function SheetViewerInner({
     getAllSheets: () => storeApi.getState().sheets,
     getFileName: () => storeApi.getState().fileName,
     setActiveSheet: (name: string) => storeApi.getState().setActiveSheet(name),
-    setHighlight: (range: string) => {
+    setHighlight: (range: string, options?: { silent?: boolean }) => {
       const s = storeApi.getState();
       if (!s.activeSheet) return;
       const sheet = s.sheets[s.activeSheet];
       if (!sheet) return;
       const ranges = parseRangeExpression(range, sheet.rows, sheet.cols);
       if (ranges.length > 0) {
+        if (options?.silent) suppressSelectionCb.current = true;
         s.setSelectionRanges(s.activeSheet, ranges, range);
         s.setRangeInput(s.activeSheet, range);
+        if (options?.silent) suppressSelectionCb.current = false;
       }
     },
     getHighlight: () => {
@@ -233,6 +238,7 @@ function SheetViewerInner({
   useEffect(() => {
     if (!onSelectionChange) return;
     const unsub = storeApi.subscribe((state, prevState) => {
+      if (suppressSelectionCb.current) return;
       if (state.selections !== prevState.selections && state.activeSheet) {
         const sel = state.selections[state.activeSheet];
         if (sel?.ranges) {

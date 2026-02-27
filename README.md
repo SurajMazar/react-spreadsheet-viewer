@@ -148,6 +148,9 @@ function App() {
     // Highlight a range
     ref.current?.setHighlight('A1:F20');
 
+    // Highlight silently (does NOT trigger onSelectionChange)
+    ref.current?.setHighlight('A1:F20', { silent: true });
+
     // Get current highlight/selection
     const range = ref.current?.getHighlight(); // e.g. "A1:D10" or null
   };
@@ -173,7 +176,7 @@ function App() {
 | `getCellRangeData(range, name?)` | `CellValue[][] \| null` | Get data for an Excel-style range (e.g. `"A1:C10"`) |
 | `getSelectedRangeData()` | `CellValue[][] \| null` | Get data for the current mouse/drag selection |
 | `setActiveSheet(name)` | `void` | Switch to a sheet |
-| `setHighlight(range)` | `void` | Highlight a cell range |
+| `setHighlight(range, options?)` | `void` | Highlight a cell range. Pass `{ silent: true }` to suppress `onSelectionChange` |
 | `getHighlight()` | `string \| null` | Get the current highlight/selection range (e.g. `"A1:D10"`) |
 | `setColumnWidth(col, width, name?)` | `void` | Set column width in pixels (min 30px) |
 | `setRowHeight(row, height, name?)` | `void` | Set row height in pixels (min 20px) |

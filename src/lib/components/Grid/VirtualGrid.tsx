@@ -175,7 +175,7 @@ export default function VirtualGrid({ highlightable = true }: VirtualGridProps) 
       const label = `${colIndexToLetter(col)}${row + 1}`;
       if (activeSheet) {
         setRangeInput(activeSheet, label);
-        setSelectionRanges(activeSheet, [], '');
+        setSelectionRanges(activeSheet, [{ startRow: row, startCol: col, endRow: row, endCol: col }], label);
       }
     },
     [activeSheet, setActiveCell, setRangeInput, setSelectionRanges]

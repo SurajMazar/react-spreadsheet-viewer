@@ -230,7 +230,7 @@ interface SheetViewerHandle {
   getCellRangeData(range: string, sheetName?: string): CellValue[][] | null;
   getSelectedRangeData(): CellValue[][] | null;
   setActiveSheet(sheetName: string): void;
-  setHighlight(range: string): void;
+  setHighlight(range: string, options?: { silent?: boolean }): void;
   getHighlight(): string | null;
   setColumnWidth(colIndex: number, width: number, sheetName?: string): void;
   setRowHeight(rowIndex: number, height: number, sheetName?: string): void;
@@ -568,6 +568,12 @@ The `chartable` prop (default: `true`) controls visibility of the Charts button 
 
 ### getHighlight Imperative Method
 `ref.current.getHighlight()` returns the current highlight/selection range as an Excel-style string (e.g. `"A1:D10"`), or `null` if no range is selected. Complements `setHighlight`.
+
+### Silent setHighlight
+`ref.current.setHighlight('A1:D10', { silent: true })` highlights a range without triggering `onSelectionChange`. Useful for programmatic highlights that should not loop back into callback logic. Uses a ref-based suppression flag in SheetViewerInner.
+
+### No Single-Cell Selection Visual
+The `sv-cell-active` class (blue outline for single clicked cells) has been removed. Only range selections (drag or programmatic) are rendered visually. This eliminates the visual discrepancy between single-cell and range selection states. The Cell component no longer computes or applies `showActiveOutline`.
 
 ### Scrollable Sheet Tabs
 The sheet tab bar now has a visible thin scrollbar for workbooks with many sheets.
