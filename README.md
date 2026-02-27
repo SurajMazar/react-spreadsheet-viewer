@@ -147,6 +147,9 @@ function App() {
 
     // Highlight a range
     ref.current?.setHighlight('A1:F20');
+
+    // Get current highlight/selection
+    const range = ref.current?.getHighlight(); // e.g. "A1:D10" or null
   };
 
   return (
@@ -171,6 +174,7 @@ function App() {
 | `getSelectedRangeData()` | `CellValue[][] \| null` | Get data for the current mouse/drag selection |
 | `setActiveSheet(name)` | `void` | Switch to a sheet |
 | `setHighlight(range)` | `void` | Highlight a cell range |
+| `getHighlight()` | `string \| null` | Get the current highlight/selection range (e.g. `"A1:D10"`) |
 | `setColumnWidth(col, width, name?)` | `void` | Set column width in pixels (min 30px) |
 | `setRowHeight(row, height, name?)` | `void` | Set row height in pixels (min 20px) |
 | `getCellComment(cellRef, name?)` | `CellComment \| null` | Get comment for a cell (e.g. `"A1"`) |
@@ -242,7 +246,7 @@ interface CellRange {
 
 ## Highlight Syntax
 
-The `highlight` prop (and `setHighlight` method) accept Excel-style cell references:
+The `highlight` prop, `setHighlight` method, and `getHighlight` method work with Excel-style cell references:
 
 | Expression | Meaning |
 |---|---|

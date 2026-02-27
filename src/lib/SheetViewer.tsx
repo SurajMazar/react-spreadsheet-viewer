@@ -94,6 +94,13 @@ function SheetViewerInner({
         s.setRangeInput(s.activeSheet, range);
       }
     },
+    getHighlight: () => {
+      const s = storeApi.getState();
+      if (!s.activeSheet) return null;
+      const sel = s.selections[s.activeSheet];
+      if (!sel || sel.ranges.length === 0) return null;
+      return sel.rangeInput || null;
+    },
     getCellRangeData: (range: string, sheetName?: string) => {
       const s = storeApi.getState();
       const key = sheetName ?? s.activeSheet ?? '';
