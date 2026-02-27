@@ -202,7 +202,9 @@ interface SheetViewerProps {
   mode?: 'view' | 'edit';       // Default: 'view'
   activeSheet?: string;          // Controlled sheet selection
   highlight?: string;            // Excel-style range to highlight (e.g. "A1:D10")
+  highlightable?: boolean;       // Enable cell/range highlighting visuals (default: true)
   onSheetChange?: (sheetName: string) => void;
+  onSheetSelect?: (sheetName: string) => void;  // Callback when a sheet tab is clicked
   onCellChange?: (sheet: string, row: number, col: number, value: CellValue) => void;
   onSelectionChange?: (ranges: CellRange[]) => void;
   downloadable?: boolean;        // Show download button
@@ -583,3 +585,9 @@ Editing cells beyond the current data bounds (in the extended "Google Sheets-lik
 
 ### Large Cell Content (Google Sheets Behavior)
 When the active cell has long content, the text expands to show the full value (overflow visible, `flex-shrink: 0` on the text span). Inactive cells remain truncated with ellipsis. The formula bar always shows the full value.
+
+### Highlightable Prop
+The `highlightable` prop (default: `true`) controls whether cell/range highlight visuals are shown. When `false`, active cell outlines, range tint, range border highlights, and the marching ants copy indicator are all suppressed. Cell clicks and selection state still work internally (for imperative API access), only the visual rendering is disabled.
+
+### onSheetSelect Callback
+The `onSheetSelect` prop fires when the user clicks a sheet tab. Receives the selected sheet name. Works alongside the existing `onSheetChange` prop (both are called on tab click).

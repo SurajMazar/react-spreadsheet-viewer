@@ -149,8 +149,12 @@ export interface SheetViewerProps {
   activeSheet?: string;
   /** Cell range expression to highlight (e.g. "A1:D10") */
   highlight?: string;
+  /** Enable cell/range highlighting visuals (default: true). When false, active cell outline, range tint, and range borders are suppressed. */
+  highlightable?: boolean;
   /** Callback when the user switches sheets */
   onSheetChange?: (sheetName: string) => void;
+  /** Callback when the user selects a sheet tab. Receives the selected sheet name. */
+  onSheetSelect?: (sheetName: string) => void;
   /** Callback when a cell is edited */
   onCellChange?: (sheet: string, row: number, col: number, value: CellValue) => void;
   /** Callback when selection changes */

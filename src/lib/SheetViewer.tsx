@@ -42,7 +42,9 @@ function SheetViewerInner({
   mode = 'view',
   activeSheet: controlledSheet,
   highlight,
+  highlightable = true,
   onSheetChange,
+  onSheetSelect,
   onCellChange,
   onSelectionChange,
   downloadable = false,
@@ -281,12 +283,12 @@ function SheetViewerInner({
           <FormulaBar />
           <div className="sv-main-content">
             <div className="sv-grid-wrapper">
-              <VirtualGrid />
+              <VirtualGrid highlightable={highlightable} />
               {searchable && <SearchBar />}
             </div>
             {chartable && <ChartPanel />}
           </div>
-          <SheetTabs onSheetChange={onSheetChange} />
+          <SheetTabs onSheetChange={onSheetChange} onSheetSelect={onSheetSelect} />
           <StatusBar />
         </>
       )}
