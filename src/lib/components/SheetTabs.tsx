@@ -3,9 +3,10 @@ import { useViewerStore } from '../context/ViewerContext';
 
 export interface SheetTabsProps {
   onSheetChange?: (name: string) => void;
+  onSheetSelect?: (name: string) => void;
 }
 
-export default function SheetTabs({ onSheetChange }: SheetTabsProps) {
+export default function SheetTabs({ onSheetChange, onSheetSelect }: SheetTabsProps) {
   const sheetNames = useViewerStore((s) => s.sheetNames);
   const activeSheet = useViewerStore((s) => s.activeSheet);
   const setActiveSheet = useViewerStore((s) => s.setActiveSheet);
@@ -15,8 +16,9 @@ export default function SheetTabs({ onSheetChange }: SheetTabsProps) {
     (name: string) => {
       setActiveSheet(name);
       onSheetChange?.(name);
+      onSheetSelect?.(name);
     },
-    [setActiveSheet, onSheetChange]
+    [setActiveSheet, onSheetChange, onSheetSelect]
   );
 
   if (sheetNames.length === 0) return null;

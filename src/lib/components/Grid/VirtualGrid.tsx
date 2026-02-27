@@ -19,7 +19,11 @@ interface EditingCell {
   col: number;
 }
 
-export default function VirtualGrid() {
+interface VirtualGridProps {
+  highlightable?: boolean;
+}
+
+export default function VirtualGrid({ highlightable = true }: VirtualGridProps) {
   const activeSheet = useViewerStore((s) => s.activeSheet);
   const sheetData = useViewerStore((s) => (s.activeSheet ? s.sheets[s.activeSheet] : null));
   const activeCell = useViewerStore((s) => s.activeCell);
@@ -659,8 +663,8 @@ export default function VirtualGrid() {
                   rowIndex={row}
                   columnIndex={col}
                   value={value}
-                  ranges={ranges}
-                  activeCell={activeCell}
+                  ranges={highlightable ? ranges : EMPTY_RANGES}
+                  activeCell={highlightable ? activeCell : null}
                   cellStyle={cellStyle}
                   comment={cellComment}
                   isMerged={!!mergeInfo}
@@ -682,7 +686,7 @@ export default function VirtualGrid() {
         </div>
 
         {/* Marching ants copy indicator */}
-        {copiedRange && (
+        {highlightable && copiedRange && (
           <div
             className="sv-copy-indicator"
             style={{

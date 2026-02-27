@@ -31,6 +31,8 @@ A high-performance React component for viewing and editing Excel and CSV files w
 - **Data validation** — input validation with dropdown lists, number/date ranges, and error UI
 - **Formula engine** — parse and evaluate Excel-style formulas (24 built-in functions: SUM, IF, VLOOKUP, etc.)
 - **Imperative API** — access sheet data, navigate sheets, resize columns, manage comments, and more via ref
+- **Highlightable** — disable all cell/range highlight visuals with `highlightable={false}`
+- **Sheet select callback** — `onSheetSelect` fires when the user clicks a sheet tab
 - **Large cell content** — active cell expands to show full text (Google Sheets-style); inactive cells truncate with ellipsis
 - **Instance isolation** — multiple `<SheetViewer />` components on the same page are fully independent
 - **Nested container support** — horizontal trackpad/mouse scrolling works in nested scrollable containers
@@ -102,7 +104,9 @@ The `source` prop accepts multiple formats:
 | `mode` | `'view' \| 'edit'` | `'view'` | View-only or editable mode |
 | `activeSheet` | `string` | — | Controlled active sheet name |
 | `highlight` | `string` | — | Excel-style range to highlight (e.g. `"A1:D10"`, `"B:B"`, `"3:3"`) |
+| `highlightable` | `boolean` | `true` | Enable cell/range highlighting visuals. When `false`, no highlights are shown |
 | `onSheetChange` | `(sheetName: string) => void` | — | Called when the user switches sheets |
+| `onSheetSelect` | `(sheetName: string) => void` | — | Called when the user clicks a sheet tab |
 | `onCellChange` | `(sheet, row, col, value) => void` | — | Called when a cell is edited |
 | `onSelectionChange` | `(ranges: CellRange[]) => void` | — | Called when selection changes |
 | `downloadable` | `boolean` | `false` | Show a download button in the toolbar |
