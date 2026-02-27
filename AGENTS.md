@@ -231,6 +231,7 @@ interface SheetViewerHandle {
   getSelectedRangeData(): CellValue[][] | null;
   setActiveSheet(sheetName: string): void;
   setHighlight(range: string): void;
+  getHighlight(): string | null;
   setColumnWidth(colIndex: number, width: number, sheetName?: string): void;
   setRowHeight(rowIndex: number, height: number, sheetName?: string): void;
   getCellComment(cellRef: string, sheetName?: string): CellComment | null;
@@ -564,6 +565,9 @@ The `chartable` prop (default: `true`) controls visibility of the Charts button 
 
 ### getCellRangeData Imperative Method
 `ref.current.getCellRangeData('A1:C5')` returns a 2D array of cell values for any Excel-style range. Supports optional `sheetName` parameter.
+
+### getHighlight Imperative Method
+`ref.current.getHighlight()` returns the current highlight/selection range as an Excel-style string (e.g. `"A1:D10"`), or `null` if no range is selected. Complements `setHighlight`.
 
 ### Scrollable Sheet Tabs
 The sheet tab bar now has a visible thin scrollbar for workbooks with many sheets.

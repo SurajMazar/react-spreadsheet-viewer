@@ -189,6 +189,8 @@ export interface SheetViewerHandle {
   setActiveSheet(sheetName: string): void;
   /** Programmatically highlight a range */
   setHighlight(range: string): void;
+  /** Get the current highlight/selection range as an Excel-style string (e.g. "A1:D10"), or null if none. */
+  getHighlight(): string | null;
   /** Get cell values for a range expression (e.g. "A1:D10") from the active or named sheet */
   getCellRangeData(range: string, sheetName?: string): CellValue[][] | null;
   /** Get cell values for the currently selected range (drag/mouse selection). Returns null if no range is selected. */
