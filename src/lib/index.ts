@@ -19,4 +19,8 @@ export type {
   UndoEntry,
   ValidationRule,
   ValidationRuleType,
+  GridLineConfig,
+  GridLineBorderStyle,
+  ParsedGridLineConfig,
+  SheetViewerTheme,
 } from './types';

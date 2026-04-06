@@ -73,11 +73,11 @@ describe('Cell — Selection classes (Google Sheets behavior)', () => {
     expect(container.firstElementChild?.className).toBe('sv-cell');
   });
 
-  it('applies sv-cell-active when cell is active and NO range exists', () => {
+  it('does NOT apply sv-cell-active for single cell selection (no range)', () => {
     const { container } = renderCell({
       activeCell: { row: 0, col: 0 },
     });
-    expect(container.firstElementChild?.classList.contains('sv-cell-active')).toBe(true);
+    expect(container.firstElementChild?.classList.contains('sv-cell-active')).toBe(false);
     expect(container.firstElementChild?.classList.contains('sv-cell-in-range')).toBe(false);
     expect(container.firstElementChild?.classList.contains('sv-cell-active-in-range')).toBe(false);
   });
@@ -108,7 +108,7 @@ describe('Cell — Selection classes (Google Sheets behavior)', () => {
     expect(container.firstElementChild?.classList.contains('sv-cell-in-range')).toBe(false);
   });
 
-  it('applies sv-cell-active when active cell is OUTSIDE the range', () => {
+  it('does NOT apply sv-cell-active when active cell is OUTSIDE the range', () => {
     const range: CellRange = { startRow: 2, startCol: 2, endRow: 4, endCol: 4 };
     const { container } = renderCell({
       rowIndex: 0,
@@ -116,7 +116,7 @@ describe('Cell — Selection classes (Google Sheets behavior)', () => {
       ranges: [range],
       activeCell: { row: 0, col: 0 },
     });
-    expect(container.firstElementChild?.classList.contains('sv-cell-active')).toBe(true);
+    expect(container.firstElementChild?.classList.contains('sv-cell-active')).toBe(false);
     expect(container.firstElementChild?.classList.contains('sv-cell-active-in-range')).toBe(false);
   });
 

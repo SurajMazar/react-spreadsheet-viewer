@@ -1,6 +1,6 @@
 import React, { memo, type CSSProperties, type MouseEvent } from 'react';
 import { isCellInRanges, getCellBorderInRanges } from '../../utils/rangeParser';
-import type { CellRange, ActiveCell, CellValue, CellStyle, CellComment } from '../../types';
+import type { CellRange, ActiveCell, CellValue, CellStyle, CellComment, ParsedGridLineConfig } from '../../types';
 
 export interface CellProps {
   rowIndex: number;
@@ -16,6 +16,16 @@ export interface CellProps {
   onCellMouseEnter: (e: MouseEvent, row: number, col: number) => void;
   onCellDoubleClick?: (row: number, col: number) => void;
   style: CSSProperties;
+  /** Custom fill color for selected range (overrides CSS variable) */
+  highlightColor?: string;
+  /** Custom border color for selected range borders (overrides CSS variable) */
+  highlightBorderColor?: string;
+  /** True when this cell is a non-active search match */
+  isSearchMatch?: boolean;
+  /** True when this cell is the active/current search match */
+  isSearchActive?: boolean;
+  /** Grid line configs that cover this cell (pre-filtered by caller) */
+  gridLineBorders?: ParsedGridLineConfig[];
 }
 
 /**
@@ -35,30 +45,34 @@ const Cell = memo(function Cell({
   onCellMouseEnter,
   onCellDoubleClick,
   style,
+  highlightColor,
+  highlightBorderColor,
+  isSearchMatch = false,
+  isSearchActive = false,
+  gridLineBorders,
 }: CellProps) {
-  const isActive =
-    activeCell != null && activeCell.row === rowIndex && activeCell.col === columnIndex;
   const hasRange = ranges.length > 0;
   const isInRange = hasRange && isCellInRanges(rowIndex, columnIndex, ranges);
   const borders = hasRange ? getCellBorderInRanges(rowIndex, columnIndex, ranges) : null;
+  const isActive =
+    activeCell != null && activeCell.row === rowIndex && activeCell.col === columnIndex;
 
-  // Google Sheets behavior: either single-cell outline OR range highlight, not both.
-  // When a range is active: the anchor cell gets white bg (no outline, no tint).
-  // When no range: the active cell gets the thick blue outline.
-  const showActiveOutline = isActive && (!hasRange || !isInRange);
-  const showInRangeTint = isInRange && !isActive;
-  const showActiveInRange = isActive && isInRange;
+  // Only range selection is rendered visually — no single-cell outline.
+  // Search match always takes priority over range highlight visually.
+  const isAnySearchHit = isSearchMatch || isSearchActive;
+  const showInRangeTint = isInRange && !isActive && !isAnySearchHit;
+  const showActiveInRange = isActive && isInRange && !isAnySearchHit;
 
   let className = 'sv-cell';
-  if (showActiveOutline) className += ' sv-cell-active';
   if (showInRangeTint) className += ' sv-cell-in-range';
   if (showActiveInRange) className += ' sv-cell-active-in-range';
   if (isMerged) className += ' sv-cell-merged';
+  if (isSearchActive) className += ' sv-cell-search-active';
+  else if (isSearchMatch) className += ' sv-cell-search-match';
 
   // Build style object: positioning + selection borders + cell formatting
   const mergedStyle: CSSProperties = { ...style };
 
-  // Merged cells need a z-index so they render above hidden neighbor cells
   if (isMerged) {
     mergedStyle.zIndex = 2;
   }
@@ -74,17 +88,45 @@ const Cell = memo(function Cell({
     if (cellStyle.textAlign) mergedStyle.textAlign = cellStyle.textAlign;
   }
 
+  // Selection range border override
+  const borderColor = highlightBorderColor || 'var(--sv-color-primary)';
   if (borders) {
-    if (borders.top) mergedStyle.borderTop = '2px solid var(--sv-color-primary)';
-    if (borders.bottom) mergedStyle.borderBottom = '2px solid var(--sv-color-primary)';
-    if (borders.left) mergedStyle.borderLeft = '2px solid var(--sv-color-primary)';
-    if (borders.right) mergedStyle.borderRight = '2px solid var(--sv-color-primary)';
+    if (borders.top) mergedStyle.borderTop = `2px solid ${borderColor}`;
+    if (borders.bottom) mergedStyle.borderBottom = `2px solid ${borderColor}`;
+    if (borders.left) mergedStyle.borderLeft = `2px solid ${borderColor}`;
+    if (borders.right) mergedStyle.borderRight = `2px solid ${borderColor}`;
+  }
+
+  // Grid line borders: applied on top of selection borders (per-side max)
+  if (gridLineBorders && gridLineBorders.length > 0) {
+    for (const glc of gridLineBorders) {
+      const pr = glc.parsedRange;
+      const bColor = glc.borderColor || 'var(--sv-color-border)';
+      const bWidth = glc.borderWidth ?? 1;
+      const bStyle = glc.borderStyle || 'solid';
+      const borderVal = `${bWidth}px ${bStyle} ${bColor}`;
+      const isTop = rowIndex === pr.startRow;
+      const isBottom = rowIndex === pr.endRow;
+      const isLeft = columnIndex === pr.startCol;
+      const isRight = columnIndex === pr.endCol;
+      if (isTop) mergedStyle.borderTop = borderVal;
+      if (isBottom) mergedStyle.borderBottom = borderVal;
+      if (isLeft) mergedStyle.borderLeft = borderVal;
+      if (isRight) mergedStyle.borderRight = borderVal;
+      // Interior horizontal/vertical lines
+      if (!isTop) mergedStyle.borderTop = borderVal;
+      if (!isBottom) mergedStyle.borderBottom = borderVal;
+      if (!isLeft) mergedStyle.borderLeft = borderVal;
+      if (!isRight) mergedStyle.borderRight = borderVal;
+      if (glc.bgColor) mergedStyle.backgroundColor = glc.bgColor;
+    }
   }
 
   return (
     <div
       className={className}
       style={mergedStyle}
+      data-cell={`${rowIndex},${columnIndex}`}
       onClick={() => onCellClick(rowIndex, columnIndex)}
       onMouseDown={(e) => onCellMouseDown(e, rowIndex, columnIndex)}
       onMouseEnter={(e) => onCellMouseEnter(e, rowIndex, columnIndex)}

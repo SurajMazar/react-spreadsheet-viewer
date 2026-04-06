@@ -139,6 +139,70 @@ export type SheetViewerSource = string | File | ArrayBuffer | ArrayBufferView;
 /** Viewer mode */
 export type SheetViewerMode = 'view' | 'edit';
 
+// ============================================================
+// Grid lines
+// ============================================================
+
+/** Border style for a grid line range */
+export type GridLineBorderStyle = 'solid' | 'dashed' | 'dotted';
+
+/** Defines visible borders drawn over a cell range (like Excel's "All Borders") */
+export interface GridLineConfig {
+  /** Excel-style range e.g. "A1:D10" */
+  range: string;
+  /** Border color. Default: var(--sv-color-border) */
+  borderColor?: string;
+  /** Border width in pixels. Default: 1 */
+  borderWidth?: number;
+  /** Border style. Default: 'solid' */
+  borderStyle?: GridLineBorderStyle;
+  /** Fill/background color for cells in this range. Optional. */
+  bgColor?: string;
+}
+
+/** Parsed grid line config with resolved CellRange */
+export interface ParsedGridLineConfig extends Omit<GridLineConfig, 'range'> {
+  parsedRange: CellRange;
+}
+
+// ============================================================
+// Theme
+// ============================================================
+
+/** Full theme object for customizing all library colors */
+export interface SheetViewerTheme {
+  /** Main background color */
+  bgColor?: string;
+  /** Surface/secondary background (toolbars, headers, status bar) */
+  surfaceColor?: string;
+  /** Default cell border color */
+  borderColor?: string;
+  /** Light cell border color */
+  borderLightColor?: string;
+  /** Primary text color */
+  textColor?: string;
+  /** Secondary text color */
+  textSecondaryColor?: string;
+  /** Muted/placeholder text color */
+  textMutedColor?: string;
+  /** Primary accent color (selection borders, buttons, active states) */
+  primaryColor?: string;
+  /** Light variant of primary (focus rings, etc.) */
+  primaryLightColor?: string;
+  /** Very light primary background (active button backgrounds) */
+  primaryBgColor?: string;
+  /** Range selection fill color */
+  selectionColor?: string;
+  /** Range selection fill color on hover */
+  selectionHoverColor?: string;
+  /** Column/row header background */
+  headerBgColor?: string;
+  /** Column/row header text color */
+  headerTextColor?: string;
+  /** Cell hover background */
+  hoverColor?: string;
+}
+
 /** Props for the SheetViewer component */
 export interface SheetViewerProps {
   /** URL, File, ArrayBuffer, or TypedArray to load */
@@ -149,12 +213,32 @@ export interface SheetViewerProps {
   activeSheet?: string;
   /** Cell range expression to highlight (e.g. "A1:D10") */
   highlight?: string;
+  /** Fill color for the selected/highlighted range (e.g. "rgba(255,0,0,0.1)"). Default: --sv-color-selection */
+  highlightColor?: string;
+  /** Border color for the selected/highlighted range (e.g. "#ff0000"). Default: --sv-color-primary */
+  highlightBorderColor?: string;
+  /** Enable cell/range highlighting visuals (default: true). When false, active cell outline, range tint, and range borders are suppressed. */
+  highlightable?: boolean;
+  /** Grid line configs: ranges with visible cell borders (like Excel's All Borders) */
+  gridLines?: GridLineConfig[];
+  /** Show the toolbar (filename, Charts, Download buttons). Default: true */
+  showToolbar?: boolean;
+  /** Show the filename in the toolbar. Default: true. When false the logo+name are hidden but Charts/Download remain. */
+  showFileName?: boolean;
+  /** Color theme overrides for the entire library */
+  theme?: SheetViewerTheme;
+  /** Background color for search match cells. Default: rgba(255,213,79,0.3) */
+  searchMatchColor?: string;
+  /** Background color for the currently active search match. Default: rgba(255,152,0,0.5) */
+  searchActiveColor?: string;
   /** Callback when the user switches sheets */
   onSheetChange?: (sheetName: string) => void;
+  /** Callback when the user selects a sheet tab. Receives the selected sheet name. */
+  onSheetSelect?: (sheetName: string) => void;
   /** Callback when a cell is edited */
   onCellChange?: (sheet: string, row: number, col: number, value: CellValue) => void;
-  /** Callback when selection changes */
-  onSelectionChange?: (ranges: CellRange[]) => void;
+  /** Callback when selection changes, with the DOM element and bounding rect of the anchor cell */
+  onSelectionChange?: (ranges: CellRange[], cellInfo?: { element: HTMLElement; rect: DOMRect }) => void;
   /** Show a download button in the toolbar */
   downloadable?: boolean;
   /** Show the Charts button in the toolbar (default: true) */
@@ -183,8 +267,10 @@ export interface SheetViewerHandle {
   getFileName(): string | null;
   /** Programmatically switch to a sheet */
   setActiveSheet(sheetName: string): void;
-  /** Programmatically highlight a range */
-  setHighlight(range: string): void;
+  /** Programmatically highlight a range. Pass `silent: true` to suppress onSelectionChange callback. */
+  setHighlight(range: string, options?: { silent?: boolean }): void;
+  /** Get the current highlight/selection range as an Excel-style string (e.g. "A1:D10"), or null if none. */
+  getHighlight(): string | null;
   /** Get cell values for a range expression (e.g. "A1:D10") from the active or named sheet */
   getCellRangeData(range: string, sheetName?: string): CellValue[][] | null;
   /** Get cell values for the currently selected range (drag/mouse selection). Returns null if no range is selected. */
@@ -267,6 +353,10 @@ export interface ViewerState {
   chartType: string;
   /** The range that was last Ctrl+C copied (for marching ants indicator) */
   copiedRange: CellRange | null;
+  /** All search match cell positions (row/col, 0-based) */
+  searchMatches: { row: number; col: number }[];
+  /** Index of the currently focused search match */
+  searchActiveIndex: number;
 
   // Mode
   mode: SheetViewerMode;
@@ -295,6 +385,8 @@ export interface ViewerState {
   toggleChartPanel: () => void;
   setChartType: (chartType: string) => void;
   setCopiedRange: (range: CellRange | null) => void;
+  setSearchMatches: (matches: { row: number; col: number }[]) => void;
+  setSearchActiveIndex: (index: number) => void;
   setCellStyle: (sheetName: string, row: number, col: number, style: CellStyle | null) => void;
   setColumnWidth: (sheetName: string, colIndex: number, width: number) => void;
   setRowHeight: (sheetName: string, rowIndex: number, height: number) => void;

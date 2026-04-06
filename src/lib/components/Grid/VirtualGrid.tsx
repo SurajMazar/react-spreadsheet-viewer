@@ -1,13 +1,13 @@
 import React, { useCallback, useRef, useEffect, useState, useMemo, type MouseEvent } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useViewerStore, EMPTY_SELECTION, EMPTY_RANGES } from '../../context/ViewerContext';
-import { colIndexToLetter } from '../../utils/rangeParser';
+import { colIndexToLetter, isCellInRanges } from '../../utils/rangeParser';
 import { extractCellsFromRange, extractStylesFromRange, copyRangeToClipboard, pasteFromClipboard } from '../../utils/clipboard';
 import Cell from './Cell';
 import EditableCell from './EditableCell';
 import ChartOverlays from '../ChartOverlays';
 import { evaluateConditionalFormats } from '../../conditionalFormat/evaluator';
-import type { MergeCell, CellStyle, CellValueChange, CellStyleChange } from '../../types';
+import type { MergeCell, CellStyle, CellValueChange, CellStyleChange, ParsedGridLineConfig } from '../../types';
 
 export const COL_WIDTH = 100;
 export const ROW_HEIGHT = 26;
@@ -19,7 +19,19 @@ interface EditingCell {
   col: number;
 }
 
-export default function VirtualGrid() {
+interface VirtualGridProps {
+  highlightable?: boolean;
+  highlightColor?: string;
+  highlightBorderColor?: string;
+  parsedGridLines?: ParsedGridLineConfig[];
+}
+
+export default function VirtualGrid({
+  highlightable = true,
+  highlightColor,
+  highlightBorderColor,
+  parsedGridLines,
+}: VirtualGridProps) {
   const activeSheet = useViewerStore((s) => s.activeSheet);
   const sheetData = useViewerStore((s) => (s.activeSheet ? s.sheets[s.activeSheet] : null));
   const activeCell = useViewerStore((s) => s.activeCell);
@@ -32,6 +44,8 @@ export default function VirtualGrid() {
   const setRowHeight = useViewerStore((s) => s.setRowHeight);
   const copiedRange = useViewerStore((s) => s.copiedRange);
   const setCopiedRange = useViewerStore((s) => s.setCopiedRange);
+  const searchMatches = useViewerStore((s) => s.searchMatches);
+  const searchActiveIndex = useViewerStore((s) => s.searchActiveIndex);
   const pushUndo = useViewerStore((s) => s.pushUndo);
   const undo = useViewerStore((s) => s.undo);
   const redo = useViewerStore((s) => s.redo);
@@ -171,7 +185,7 @@ export default function VirtualGrid() {
       const label = `${colIndexToLetter(col)}${row + 1}`;
       if (activeSheet) {
         setRangeInput(activeSheet, label);
-        setSelectionRanges(activeSheet, [], '');
+        setSelectionRanges(activeSheet, [{ startRow: row, startCol: col, endRow: row, endCol: col }], label);
       }
     },
     [activeSheet, setActiveCell, setRangeInput, setSelectionRanges]
@@ -653,14 +667,28 @@ export default function VirtualGrid() {
                 }
               }
 
+              // Determine search match state for this cell
+              const searchMatchIdx = searchMatches.findIndex(
+                (m) => m.row === row && m.col === col
+              );
+              const isSearchActive = searchMatchIdx !== -1 && searchMatchIdx === searchActiveIndex;
+              const isSearchMatch = searchMatchIdx !== -1 && !isSearchActive;
+
+              // Grid lines that cover this cell
+              const cellGridLines = parsedGridLines
+                ? parsedGridLines.filter((glc) =>
+                    isCellInRanges(row, col, [glc.parsedRange])
+                  )
+                : undefined;
+
               return (
                 <Cell
                   key={`${vr.key}-${vc.key}`}
                   rowIndex={row}
                   columnIndex={col}
                   value={value}
-                  ranges={ranges}
-                  activeCell={activeCell}
+                  ranges={highlightable ? ranges : EMPTY_RANGES}
+                  activeCell={highlightable ? activeCell : null}
                   cellStyle={cellStyle}
                   comment={cellComment}
                   isMerged={!!mergeInfo}
@@ -668,6 +696,11 @@ export default function VirtualGrid() {
                   onCellMouseDown={onCellMouseDown}
                   onCellMouseEnter={onCellMouseEnter}
                   onCellDoubleClick={onCellDoubleClick}
+                  highlightColor={highlightColor}
+                  highlightBorderColor={highlightBorderColor}
+                  isSearchMatch={isSearchMatch}
+                  isSearchActive={isSearchActive}
+                  gridLineBorders={cellGridLines && cellGridLines.length > 0 ? cellGridLines : undefined}
                   style={{
                     position: 'absolute',
                     top: vr.start,
@@ -682,7 +715,7 @@ export default function VirtualGrid() {
         </div>
 
         {/* Marching ants copy indicator */}
-        {copiedRange && (
+        {highlightable && copiedRange && (
           <div
             className="sv-copy-indicator"
             style={{
