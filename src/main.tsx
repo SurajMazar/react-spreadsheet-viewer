@@ -1,10 +1,9 @@
 import React from 'react';
-import ReactDOM from 'react-dom';
+import { createRoot } from 'react-dom/client';
 import DemoApp from './demo/DemoApp';
 
-ReactDOM.render(
+createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <DemoApp />
-  </React.StrictMode>,
-  document.getElementById('root')
+  </React.StrictMode>
 );
