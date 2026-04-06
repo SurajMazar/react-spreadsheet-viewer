@@ -62,7 +62,7 @@ const THEME_PRESETS: Record<string, { label: string; theme: SheetViewerTheme }> 
       primaryLightColor: '#ddd6fe',
       primaryBgColor: '#f3e8ff',
       selectionColor: 'rgba(124,58,237,0.1)',
-      selectionHoverColor: 'rgba(124,58,237,0.18)',
+      selectionHoverColor: 'rgba(124,58,237,0.19)',
       headerBgColor: '#f3e8ff',
       headerTextColor: '#6d28d9',
     },
