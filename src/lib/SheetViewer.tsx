@@ -1,4 +1,4 @@
-import React, { useEffect, forwardRef, useImperativeHandle, type Ref } from 'react';
+import React, { useEffect, useMemo, useRef as useReactRef, forwardRef, useImperativeHandle, type Ref, type CSSProperties } from 'react';
 import { ViewerProvider, useViewerStore, useViewerStoreApi } from './context/ViewerContext';
 import { useSourceLoader } from './hooks/useSourceLoader';
 import { useFileParser } from './hooks/useFileParser';
@@ -10,7 +10,7 @@ import SheetTabs from './components/SheetTabs';
 import StatusBar from './components/StatusBar';
 import ChartPanel from './components/ChartPanel';
 import SearchBar from './components/SearchBar';
-import type { SheetViewerProps, SheetViewerHandle, SheetViewerMode, CellValue, CellComment } from './types';
+import type { SheetViewerProps, SheetViewerHandle, SheetViewerMode, CellValue, CellComment, ParsedGridLineConfig } from './types';
 import './styles/sheet-viewer.css';
 
 /**
@@ -42,7 +42,17 @@ function SheetViewerInner({
   mode = 'view',
   activeSheet: controlledSheet,
   highlight,
+  highlightColor,
+  highlightBorderColor,
+  highlightable = true,
+  gridLines,
+  showToolbar = true,
+  showFileName = true,
+  theme,
+  searchMatchColor,
+  searchActiveColor,
   onSheetChange,
+  onSheetSelect,
   onCellChange,
   onSelectionChange,
   downloadable = false,
@@ -69,6 +79,53 @@ function SheetViewerInner({
   const sheetData = useViewerStore((s) => (s.activeSheet ? s.sheets[s.activeSheet] : null));
   const setMode = useViewerStore((s) => s.setMode);
 
+  // Flag to suppress onSelectionChange for silent setHighlight calls
+  const suppressSelectionCb = useReactRef(false);
+
+  // Parse gridLines prop into resolved CellRange configs
+  const parsedGridLines = useMemo<ParsedGridLineConfig[]>(() => {
+    if (!gridLines || !sheetData) return [];
+    const result: ParsedGridLineConfig[] = [];
+    for (const glc of gridLines) {
+      const ranges = parseRangeExpression(glc.range, sheetData.rows, sheetData.cols);
+      if (ranges.length > 0) {
+        result.push({
+          parsedRange: ranges[0],
+          borderColor: glc.borderColor,
+          borderWidth: glc.borderWidth,
+          borderStyle: glc.borderStyle,
+          bgColor: glc.bgColor,
+        });
+      }
+    }
+    return result;
+  }, [gridLines, sheetData]);
+
+  // Build CSS variable overrides from theme + highlight/search colors
+  const themeStyle = useMemo<CSSProperties>(() => {
+    const vars: Record<string, string> = {};
+    if (theme?.bgColor) vars['--sv-color-bg'] = theme.bgColor;
+    if (theme?.surfaceColor) vars['--sv-color-surface'] = theme.surfaceColor;
+    if (theme?.borderColor) vars['--sv-color-border'] = theme.borderColor;
+    if (theme?.borderLightColor) vars['--sv-color-border-light'] = theme.borderLightColor;
+    if (theme?.textColor) vars['--sv-color-text'] = theme.textColor;
+    if (theme?.textSecondaryColor) vars['--sv-color-text-secondary'] = theme.textSecondaryColor;
+    if (theme?.textMutedColor) vars['--sv-color-text-muted'] = theme.textMutedColor;
+    if (theme?.primaryColor) vars['--sv-color-primary'] = theme.primaryColor;
+    if (theme?.primaryLightColor) vars['--sv-color-primary-light'] = theme.primaryLightColor;
+    if (theme?.primaryBgColor) vars['--sv-color-primary-bg'] = theme.primaryBgColor;
+    if (theme?.selectionColor) vars['--sv-color-selection'] = theme.selectionColor;
+    if (theme?.selectionHoverColor) vars['--sv-color-selection-hover'] = theme.selectionHoverColor;
+    if (theme?.headerBgColor) vars['--sv-color-header-bg'] = theme.headerBgColor;
+    if (theme?.headerTextColor) vars['--sv-color-header-text'] = theme.headerTextColor;
+    if (theme?.hoverColor) vars['--sv-color-hover'] = theme.hoverColor;
+    if (searchMatchColor) vars['--sv-search-match-color'] = searchMatchColor;
+    if (searchActiveColor) vars['--sv-search-active-color'] = searchActiveColor;
+    // Highlight fill color via CSS variable (overrides the !important in .sv-cell-in-range)
+    if (highlightColor) vars['--sv-highlight-color'] = highlightColor;
+    return vars as CSSProperties;
+  }, [theme, searchMatchColor, searchActiveColor]);
+
   // Expose imperative handle via ref
   useImperativeHandle(forwardedRef, () => ({
     getSheetNames: () => storeApi.getState().sheetNames,
@@ -81,16 +138,25 @@ function SheetViewerInner({
     getAllSheets: () => storeApi.getState().sheets,
     getFileName: () => storeApi.getState().fileName,
     setActiveSheet: (name: string) => storeApi.getState().setActiveSheet(name),
-    setHighlight: (range: string) => {
+    setHighlight: (range: string, options?: { silent?: boolean }) => {
       const s = storeApi.getState();
       if (!s.activeSheet) return;
       const sheet = s.sheets[s.activeSheet];
       if (!sheet) return;
       const ranges = parseRangeExpression(range, sheet.rows, sheet.cols);
       if (ranges.length > 0) {
+        if (options?.silent) suppressSelectionCb.current = true;
         s.setSelectionRanges(s.activeSheet, ranges, range);
         s.setRangeInput(s.activeSheet, range);
+        if (options?.silent) suppressSelectionCb.current = false;
       }
+    },
+    getHighlight: () => {
+      const s = storeApi.getState();
+      if (!s.activeSheet) return null;
+      const sel = s.selections[s.activeSheet];
+      if (!sel || sel.ranges.length === 0) return null;
+      return sel.rangeInput || null;
     },
     getCellRangeData: (range: string, sheetName?: string) => {
       const s = storeApi.getState();
@@ -220,14 +286,27 @@ function SheetViewerInner({
     return unsub;
   }, [onCellChange, storeApi]);
 
-  // Listen for selection changes and forward to callback
+  // Listen for selection changes and forward to callback (with optional cell DOM info)
   useEffect(() => {
     if (!onSelectionChange) return;
     const unsub = storeApi.subscribe((state, prevState) => {
+      if (suppressSelectionCb.current) return;
       if (state.selections !== prevState.selections && state.activeSheet) {
         const sel = state.selections[state.activeSheet];
         if (sel?.ranges) {
-          onSelectionChange(sel.ranges);
+          const cell = state.activeCell;
+          if (cell) {
+            const el = document.querySelector<HTMLElement>(
+              `[data-cell="${cell.row},${cell.col}"]`
+            );
+            if (el) {
+              onSelectionChange(sel.ranges, { element: el, rect: el.getBoundingClientRect() });
+            } else {
+              onSelectionChange(sel.ranges);
+            }
+          } else {
+            onSelectionChange(sel.ranges);
+          }
         }
       }
     });
@@ -238,9 +317,10 @@ function SheetViewerInner({
   const isLoadingAny = sourceLoading || isParsing;
   const error = sourceError || parseError;
 
-  const containerStyle = {
+  const containerStyle: CSSProperties = {
     width: typeof width === 'number' ? `${width}px` : width,
     height: typeof height === 'number' ? `${height}px` : height,
+    ...themeStyle,
   };
 
   return (
@@ -277,16 +357,21 @@ function SheetViewerInner({
 
       {hasData && (
         <>
-          <Toolbar downloadable={downloadable} chartable={chartable} />
+          {showToolbar && <Toolbar downloadable={downloadable} chartable={chartable} showFileName={showFileName} />}
           <FormulaBar />
           <div className="sv-main-content">
             <div className="sv-grid-wrapper">
-              <VirtualGrid />
+              <VirtualGrid
+                highlightable={highlightable}
+                highlightColor={highlightColor}
+                highlightBorderColor={highlightBorderColor}
+                parsedGridLines={parsedGridLines.length > 0 ? parsedGridLines : undefined}
+              />
               {searchable && <SearchBar />}
             </div>
             {chartable && <ChartPanel />}
           </div>
-          <SheetTabs onSheetChange={onSheetChange} />
+          <SheetTabs onSheetChange={onSheetChange} onSheetSelect={onSheetSelect} />
           <StatusBar />
         </>
       )}

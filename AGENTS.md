@@ -202,9 +202,19 @@ interface SheetViewerProps {
   mode?: 'view' | 'edit';       // Default: 'view'
   activeSheet?: string;          // Controlled sheet selection
   highlight?: string;            // Excel-style range to highlight (e.g. "A1:D10")
+  highlightColor?: string;       // Custom fill color for the selected range (e.g. "rgba(255,0,0,0.1)")
+  highlightBorderColor?: string; // Custom border color for the selected range (e.g. "#ff0000")
+  highlightable?: boolean;       // Enable cell/range highlighting visuals (default: true)
+  gridLines?: GridLineConfig[];  // Data-driven cell borders on arbitrary ranges (Excel "All Borders")
+  showToolbar?: boolean;         // Show/hide the entire toolbar row (default: true)
+  showFileName?: boolean;        // Show/hide only the filename/logo in the toolbar (default: true)
+  theme?: SheetViewerTheme;      // Override the entire library color palette
+  searchMatchColor?: string;     // Background color for search match cells (default: yellow-ish)
+  searchActiveColor?: string;    // Background color for the current active search match (default: orange-ish)
   onSheetChange?: (sheetName: string) => void;
+  onSheetSelect?: (sheetName: string) => void;  // Callback when a sheet tab is clicked
   onCellChange?: (sheet: string, row: number, col: number, value: CellValue) => void;
-  onSelectionChange?: (ranges: CellRange[]) => void;
+  onSelectionChange?: (ranges: CellRange[], cellInfo?: { element: HTMLElement; rect: DOMRect }) => void;
   downloadable?: boolean;        // Show download button
   chartable?: boolean;           // Show Charts button in toolbar (default: true)
   searchable?: boolean;          // Enable Ctrl+F search (default: true)
@@ -228,7 +238,8 @@ interface SheetViewerHandle {
   getCellRangeData(range: string, sheetName?: string): CellValue[][] | null;
   getSelectedRangeData(): CellValue[][] | null;
   setActiveSheet(sheetName: string): void;
-  setHighlight(range: string): void;
+  setHighlight(range: string, options?: { silent?: boolean }): void;
+  getHighlight(): string | null;
   setColumnWidth(colIndex: number, width: number, sheetName?: string): void;
   setRowHeight(rowIndex: number, height: number, sheetName?: string): void;
   getCellComment(cellRef: string, sheetName?: string): CellComment | null;
@@ -246,9 +257,11 @@ interface SheetViewerHandle {
 export { SheetViewer } from './SheetViewer';
 export type {
   SheetViewerProps, SheetViewerHandle, SheetViewerSource, SheetViewerMode,
+  SheetViewerTheme,
   SheetData, CellRange, CellValue, CellComment, CellStyle,
   ChartOverlay, ChartSeries, ChartType,
   ConditionalFormatRule, ConditionalFormatRuleType,
+  GridLineConfig, GridLineBorderStyle, ParsedGridLineConfig,
   MergeCell, SelectionState,
   UndoEntry, ValidationRule, ValidationRuleType,
 } from './types';
@@ -343,8 +356,9 @@ Test files follow the `__tests__/` directory convention next to the code they te
 
 ### Visual Tests (Storybook + Chromatic)
 
-10 stories in `stories/SheetViewer.stories.tsx`:
-`FromFile`, `ViewMode`, `EditMode`, `WithHighlight`, `WithDownload`, `CustomSize`, `MultipleInstances`, `ControlledSheet`, `WithRef`, `NoSource`
+20 stories in `stories/SheetViewer.stories.tsx`:
+Original 10: `FromFile`, `ViewMode`, `EditMode`, `WithHighlight`, `WithDownload`, `CustomSize`, `MultipleInstances`, `ControlledSheet`, `WithRef`, `NoSource`
+New 10: `CustomHighlightColors`, `SeparateSearchHighlight`, `SearchHighlightCustomColors`, `GridLinesStory`, `ShowToolbarProp`, `ThemePresets`, `SelectionChangeWithCellInfo`, `HighlightableOff`, `LargeDataset`, `AllFeaturesEnabled`
 
 Stories use `createMockCsvFile()` to generate test data inline (no external fixture files needed).
 
@@ -468,20 +482,20 @@ npm publish --otp=<code>    # Requires 2FA OTP from authenticator app
 
 | File | Lines | Purpose |
 |---|---|---|
-| `src/lib/types.ts` | ~185 | All shared TypeScript types |
-| `src/lib/index.ts` | ~12 | Public library entry point |
-| `src/lib/SheetViewer.tsx` | ~236 | Root component with forwardRef |
-| `src/lib/context/ViewerContext.tsx` | ~208 | Zustand store + provider |
+| `src/lib/types.ts` | ~320 | All shared TypeScript types (incl. GridLineConfig, SheetViewerTheme) |
+| `src/lib/index.ts` | ~14 | Public library entry point |
+| `src/lib/SheetViewer.tsx` | ~280 | Root component with forwardRef (theme vars, gridLines parsing, cellInfo callback) |
+| `src/lib/context/ViewerContext.tsx` | ~230 | Zustand store + provider (incl. searchMatches, searchActiveIndex) |
 | `src/lib/hooks/useSourceLoader.ts` | ~75 | Source → ArrayBuffer normalization |
 | `src/lib/hooks/useFileParser.ts` | ~297 | Buffer → parsed sheet data |
 | `src/lib/components/Grid/VirtualGrid.tsx` | ~550 | Virtualized grid (main render, merge handling, copy/paste, scroll fixes) |
-| `src/lib/components/Grid/Cell.tsx` | ~87 | Read-only cell (with merged cell support) |
+| `src/lib/components/Grid/Cell.tsx` | ~135 | Read-only cell (highlight colors, search match, grid lines, data-cell attr) |
 | `src/lib/components/Grid/EditableCell.tsx` | ~90 | Editable cell |
 | `src/lib/components/Toolbar.tsx` | ~50 | Top toolbar |
 | `src/lib/components/FormulaBar.tsx` | ~70 | Formula/range input bar |
 | `src/lib/components/SheetTabs.tsx` | ~40 | Sheet tab bar |
 | `src/lib/components/StatusBar.tsx` | ~40 | Bottom status bar |
-| `src/lib/components/SearchBar.tsx` | ~100 | Ctrl+F search |
+| `src/lib/components/SearchBar.tsx` | ~150 | Ctrl+F search (uses dedicated searchMatches store state, not selection) |
 | `src/lib/components/ChartPanel.tsx` | ~130 | Chart creation panel |
 | `src/lib/components/ChartOverlays.tsx` | ~100 | Floating embedded charts |
 | `src/lib/utils/rangeParser.ts` | ~185 | Excel reference parsing |
@@ -489,9 +503,10 @@ npm publish --otp=<code>    # Requires 2FA OTP from authenticator app
 | `src/lib/utils/download.ts` | ~60 | XLSX/CSV export |
 | `src/lib/utils/pivotReconstructor.ts` | ~438 | Pivot table reconstruction |
 | `src/lib/utils/chartExtractor.ts` | ~315 | Embedded chart extraction |
-| `src/lib/styles/sheet-viewer.css` | ~923 | All component styles (includes merged cell, selection highlight, sheet tab scrollbar) |
-| `src/demo/DemoApp.tsx` | ~131 | Demo app with file upload |
-| `stories/SheetViewer.stories.tsx` | ~230 | 10 Storybook stories |
+| `src/lib/styles/sheet-viewer.css` | ~950 | All component styles (incl. --sv-search-match-color, sv-cell-search-match/active) |
+| `src/demo/DemoApp.tsx` | ~280 | Interactive demo with collapsible side panel (4 tabs, all props exposed) |
+| `src/demo/demo.css` | ~310 | Demo styles for side panel layout |
+| `stories/SheetViewer.stories.tsx` | ~380 | 20 Storybook stories (10 original + 10 new feature stories) |
 | `vite.config.ts` | ~54 | Build config (dual mode + vite-plugin-dts) |
 | `tsconfig.json` | ~20 | TypeScript config |
 | `vitest.setup.ts` | ~30 | Test polyfills |
@@ -563,6 +578,15 @@ The `chartable` prop (default: `true`) controls visibility of the Charts button 
 ### getCellRangeData Imperative Method
 `ref.current.getCellRangeData('A1:C5')` returns a 2D array of cell values for any Excel-style range. Supports optional `sheetName` parameter.
 
+### getHighlight Imperative Method
+`ref.current.getHighlight()` returns the current highlight/selection range as an Excel-style string (e.g. `"A1:D10"`), or `null` if no range is selected. Complements `setHighlight`.
+
+### Silent setHighlight
+`ref.current.setHighlight('A1:D10', { silent: true })` highlights a range without triggering `onSelectionChange`. Useful for programmatic highlights that should not loop back into callback logic. Uses a ref-based suppression flag in SheetViewerInner.
+
+### No Single-Cell Selection Visual
+The `sv-cell-active` class (blue outline for single clicked cells) has been removed. Only range selections (drag or programmatic) are rendered visually. This eliminates the visual discrepancy between single-cell and range selection states. The Cell component no longer computes or applies `showActiveOutline`.
+
 ### Scrollable Sheet Tabs
 The sheet tab bar now has a visible thin scrollbar for workbooks with many sheets.
 
@@ -583,3 +607,47 @@ Editing cells beyond the current data bounds (in the extended "Google Sheets-lik
 
 ### Large Cell Content (Google Sheets Behavior)
 When the active cell has long content, the text expands to show the full value (overflow visible, `flex-shrink: 0` on the text span). Inactive cells remain truncated with ellipsis. The formula bar always shows the full value.
+
+### Highlightable Prop
+The `highlightable` prop (default: `true`) controls whether cell/range highlight visuals are shown. When `false`, active cell outlines, range tint, range border highlights, and the marching ants copy indicator are all suppressed. Cell clicks and selection state still work internally (for imperative API access), only the visual rendering is disabled.
+
+### onSheetSelect Callback
+The `onSheetSelect` prop fires when the user clicks a sheet tab. Receives the selected sheet name. Works alongside the existing `onSheetChange` prop (both are called on tab click).
+
+### Customizable Highlight Colors (`highlightColor`, `highlightBorderColor`)
+Two new props override the default blue selection visuals. `highlightColor` (e.g. `"rgba(255,0,0,0.12)"`) sets the range fill; `highlightBorderColor` (e.g. `"#e53935"`) sets the selection border. Passed through `SheetViewer` → `VirtualGrid` → `Cell`. In `Cell.tsx`, they replace the hardcoded `var(--sv-color-primary)` inline border value. CSS variable `--sv-color-selection-hover` replaces the previously hardcoded `rgba(26,115,232,0.14)` in `.sv-cell-in-range:hover`.
+
+### Separate Search Highlight
+`SearchBar` previously called `setActiveCell`/`setRangeInput` (same pipeline as user selection), causing search and selection to conflict. Now it uses dedicated store fields:
+- `searchMatches: { row: number; col: number }[]` — all match positions
+- `searchActiveIndex: number` — current focused match
+- Actions: `setSearchMatches(matches)`, `setSearchActiveIndex(index)`
+
+`SearchBar` calls `setSearchMatches` (all hits) and `setSearchActiveIndex` (current) instead of touching selection ranges. `VirtualGrid` reads these fields and passes `isSearchMatch`/`isSearchActive` to each `Cell`. Cells render with `sv-cell-search-match` (all matches) or `sv-cell-search-active` (current match). Search matches are cleared when the search bar closes or the active sheet changes.
+
+### Search Match Color Props (`searchMatchColor`, `searchActiveColor`)
+Override search highlight colors via CSS variables. Applied as inline style on the root `.sheet-viewer` element alongside the `theme` vars. Defaults: `--sv-search-match-color: rgba(255,213,79,0.35)`, `--sv-search-active-color: rgba(255,152,0,0.55)`.
+
+### Grid Lines (`gridLines: GridLineConfig[]`)
+Data-driven visible cell borders drawn on arbitrary ranges. Each config: `{ range, borderColor?, borderWidth?, borderStyle?, bgColor? }`. `SheetViewer` parses each range via `parseRangeExpression` into `ParsedGridLineConfig[]` inside a `useMemo`. `VirtualGrid` receives `parsedGridLines` and passes per-cell filtered configs to `Cell`. `Cell` applies border/bg inline for all sides (all interior cells get all four sides bordered). Works in both view and edit mode. Types: `GridLineConfig`, `GridLineBorderStyle`, `ParsedGridLineConfig` — all exported.
+
+### Show / Hide Toolbar (`showToolbar`, `showFileName`)
+- `showToolbar?: boolean` (default: `true`) — when `false`, the entire `<Toolbar>` component is not rendered at all.
+- `showFileName?: boolean` (default: `true`) — when `false`, only the logo + filename section inside the toolbar is hidden; the Charts and Download buttons remain visible. Implemented as a conditional render in `Toolbar.tsx` wrapping the `sv-toolbar-left` div.
+
+### Search Priority Over Selection Highlight
+Search match highlights now always win over range selection highlight. In `Cell.tsx`, `showInRangeTint` and `showActiveInRange` are set to `false` when the cell is a search hit (`isSearchMatch || isSearchActive`). This means the `sv-cell-in-range` class is never applied to search match cells, avoiding any CSS conflict between the two highlights.
+
+### Theme Object (`theme: SheetViewerTheme`)
+Full palette override via a single prop. `SheetViewerTheme` has 15 optional fields mapping to CSS custom properties. In `SheetViewerInner`, a `useMemo` computes a `CSSProperties` record of `--sv-color-*` overrides and merges it into the root `.sheet-viewer` `style` prop. Since every component already uses `var(--sv-color-*)`, no component changes are needed — the overrides cascade automatically. `SheetViewerTheme` is exported from the library.
+
+### Cell Element Ref in `onSelectionChange`
+The `onSelectionChange` signature is now `(ranges: CellRange[], cellInfo?: { element: HTMLElement; rect: DOMRect }) => void`. Every `Cell` now has `data-cell="${row},${col}"` attribute. When selection changes, `SheetViewerInner` looks up the active cell's DOM element via `document.querySelector('[data-cell="..."]')`, calls `getBoundingClientRect()`, and passes both to the callback. Useful for positioning custom popovers or tooltips aligned to the selected cell.
+
+### Interactive Demo App Overhaul
+`DemoApp.tsx` now features a collapsible side panel with four tabs:
+- **Display** — mode toggle, toolbar/download/charts/search/highlightable checkboxes, highlight range input with apply/silent/getInfo actions
+- **Colors** — theme preset selector (5 presets: Default, Dark, Forest Green, Purple, Warm Amber), selection highlight fill/border color pickers, search match/active color pickers
+- **Grid Lines** — preset selector (None, Header Row, Data Table, Dashed Zone, Multi-zone) + custom range and color
+- **Events** — live `onSelectionChange` info (range string, anchor cell rect), and imperative ref action buttons
+`demo.css` fully rewritten to support the panel layout.
