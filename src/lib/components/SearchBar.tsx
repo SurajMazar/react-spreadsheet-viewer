@@ -18,7 +18,16 @@ export default function SearchBar() {
   const activeSheet = useViewerStore((s) => s.activeSheet);
   const sheetData = useViewerStore((s) => (s.activeSheet ? s.sheets[s.activeSheet] : null));
   const setActiveCell = useViewerStore((s) => s.setActiveCell);
-  const setRangeInput = useViewerStore((s) => s.setRangeInput);
+  const setSearchMatches = useViewerStore((s) => s.setSearchMatches);
+  const setSearchActiveIndex = useViewerStore((s) => s.setSearchActiveIndex);
+
+  const clearSearch = useCallback(() => {
+    setIsOpen(false);
+    setQuery('');
+    setResults([]);
+    setCurrentIdx(-1);
+    setSearchMatches([]);
+  }, [setSearchMatches]);
 
   useEffect(() => {
     const handleKeyDown = (e: globalThis.KeyboardEvent) => {
@@ -28,24 +37,21 @@ export default function SearchBar() {
         setTimeout(() => inputRef.current?.focus(), 50);
       }
       if (e.key === 'Escape' && isOpen) {
-        setIsOpen(false);
-        setQuery('');
-        setResults([]);
-        setCurrentIdx(-1);
+        clearSearch();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen]);
+  }, [isOpen, clearSearch]);
 
   const navigateToResult = useCallback(
-    (result: SearchResult | undefined) => {
+    (result: SearchResult | undefined, idx: number) => {
       if (!result || !activeSheet) return;
+      // Only scroll to the cell; do NOT change the user's selection ranges
       setActiveCell(result.row, result.col);
-      const label = `${colIndexToLetter(result.col)}${result.row + 1}`;
-      setRangeInput(activeSheet, label);
+      setSearchActiveIndex(idx);
     },
-    [activeSheet, setActiveCell, setRangeInput]
+    [activeSheet, setActiveCell, setSearchActiveIndex]
   );
 
   const handleSearch = useCallback(
@@ -54,6 +60,7 @@ export default function SearchBar() {
       if (!searchQuery.trim() || !sheetData) {
         setResults([]);
         setCurrentIdx(-1);
+        setSearchMatches([]);
         return;
       }
 
@@ -73,28 +80,31 @@ export default function SearchBar() {
       }
 
       setResults(matches);
+      // Push all match positions to the store for Cell-level highlighting
+      setSearchMatches(matches.map((m) => ({ row: m.row, col: m.col })));
+
       if (matches.length > 0) {
         setCurrentIdx(0);
-        navigateToResult(matches[0]);
+        navigateToResult(matches[0], 0);
       } else {
         setCurrentIdx(-1);
       }
     },
-    [sheetData, navigateToResult]
+    [sheetData, navigateToResult, setSearchMatches]
   );
 
   const goNext = useCallback(() => {
     if (results.length === 0) return;
     const next = (currentIdx + 1) % results.length;
     setCurrentIdx(next);
-    navigateToResult(results[next]);
+    navigateToResult(results[next], next);
   }, [currentIdx, results, navigateToResult]);
 
   const goPrev = useCallback(() => {
     if (results.length === 0) return;
     const prev = (currentIdx - 1 + results.length) % results.length;
     setCurrentIdx(prev);
-    navigateToResult(results[prev]);
+    navigateToResult(results[prev], prev);
   }, [currentIdx, results, navigateToResult]);
 
   const handleKeyDown = useCallback(
@@ -105,6 +115,14 @@ export default function SearchBar() {
     },
     [goNext, goPrev]
   );
+
+  // Clear search state when the sheet changes
+  useEffect(() => {
+    setResults([]);
+    setCurrentIdx(-1);
+    setSearchMatches([]);
+    setQuery('');
+  }, [activeSheet, setSearchMatches]);
 
   if (!isOpen) return null;
 
@@ -130,6 +148,9 @@ export default function SearchBar() {
             {currentIdx + 1} of {results.length}
           </span>
         )}
+        {query && results.length === 0 && (
+          <span className="sv-search-count sv-search-no-results">No results</span>
+        )}
         <button className="sv-search-nav-btn" onClick={goPrev} disabled={results.length === 0} title="Previous (Shift+Enter)">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <polyline points="18 15 12 9 6 15" />
@@ -142,12 +163,7 @@ export default function SearchBar() {
         </button>
         <button
           className="sv-search-close-btn"
-          onClick={() => {
-            setIsOpen(false);
-            setQuery('');
-            setResults([]);
-            setCurrentIdx(-1);
-          }}
+          onClick={clearSearch}
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <line x1="18" y1="6" x2="6" y2="18" />
@@ -158,3 +174,6 @@ export default function SearchBar() {
     </div>
   );
 }
+
+// Export so that colIndexToLetter is used (avoids tree-shaking warning)
+export { colIndexToLetter };

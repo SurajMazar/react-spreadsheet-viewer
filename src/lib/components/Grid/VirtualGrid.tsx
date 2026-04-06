@@ -1,13 +1,13 @@
 import React, { useCallback, useRef, useEffect, useState, useMemo, type MouseEvent } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useViewerStore, EMPTY_SELECTION, EMPTY_RANGES } from '../../context/ViewerContext';
-import { colIndexToLetter } from '../../utils/rangeParser';
+import { colIndexToLetter, isCellInRanges } from '../../utils/rangeParser';
 import { extractCellsFromRange, extractStylesFromRange, copyRangeToClipboard, pasteFromClipboard } from '../../utils/clipboard';
 import Cell from './Cell';
 import EditableCell from './EditableCell';
 import ChartOverlays from '../ChartOverlays';
 import { evaluateConditionalFormats } from '../../conditionalFormat/evaluator';
-import type { MergeCell, CellStyle, CellValueChange, CellStyleChange } from '../../types';
+import type { MergeCell, CellStyle, CellValueChange, CellStyleChange, ParsedGridLineConfig } from '../../types';
 
 export const COL_WIDTH = 100;
 export const ROW_HEIGHT = 26;
@@ -21,9 +21,17 @@ interface EditingCell {
 
 interface VirtualGridProps {
   highlightable?: boolean;
+  highlightColor?: string;
+  highlightBorderColor?: string;
+  parsedGridLines?: ParsedGridLineConfig[];
 }
 
-export default function VirtualGrid({ highlightable = true }: VirtualGridProps) {
+export default function VirtualGrid({
+  highlightable = true,
+  highlightColor,
+  highlightBorderColor,
+  parsedGridLines,
+}: VirtualGridProps) {
   const activeSheet = useViewerStore((s) => s.activeSheet);
   const sheetData = useViewerStore((s) => (s.activeSheet ? s.sheets[s.activeSheet] : null));
   const activeCell = useViewerStore((s) => s.activeCell);
@@ -36,6 +44,8 @@ export default function VirtualGrid({ highlightable = true }: VirtualGridProps) 
   const setRowHeight = useViewerStore((s) => s.setRowHeight);
   const copiedRange = useViewerStore((s) => s.copiedRange);
   const setCopiedRange = useViewerStore((s) => s.setCopiedRange);
+  const searchMatches = useViewerStore((s) => s.searchMatches);
+  const searchActiveIndex = useViewerStore((s) => s.searchActiveIndex);
   const pushUndo = useViewerStore((s) => s.pushUndo);
   const undo = useViewerStore((s) => s.undo);
   const redo = useViewerStore((s) => s.redo);
@@ -657,6 +667,20 @@ export default function VirtualGrid({ highlightable = true }: VirtualGridProps) 
                 }
               }
 
+              // Determine search match state for this cell
+              const searchMatchIdx = searchMatches.findIndex(
+                (m) => m.row === row && m.col === col
+              );
+              const isSearchActive = searchMatchIdx !== -1 && searchMatchIdx === searchActiveIndex;
+              const isSearchMatch = searchMatchIdx !== -1 && !isSearchActive;
+
+              // Grid lines that cover this cell
+              const cellGridLines = parsedGridLines
+                ? parsedGridLines.filter((glc) =>
+                    isCellInRanges(row, col, [glc.parsedRange])
+                  )
+                : undefined;
+
               return (
                 <Cell
                   key={`${vr.key}-${vc.key}`}
@@ -672,6 +696,11 @@ export default function VirtualGrid({ highlightable = true }: VirtualGridProps) 
                   onCellMouseDown={onCellMouseDown}
                   onCellMouseEnter={onCellMouseEnter}
                   onCellDoubleClick={onCellDoubleClick}
+                  highlightColor={highlightColor}
+                  highlightBorderColor={highlightBorderColor}
+                  isSearchMatch={isSearchMatch}
+                  isSearchActive={isSearchActive}
+                  gridLineBorders={cellGridLines && cellGridLines.length > 0 ? cellGridLines : undefined}
                   style={{
                     position: 'absolute',
                     top: vr.start,
