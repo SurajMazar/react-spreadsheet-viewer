@@ -6,9 +6,10 @@ import { downloadAsXlsx, downloadAsCsv } from '../utils/download';
 export interface ToolbarProps {
   downloadable?: boolean;
   chartable?: boolean;
+  showFileName?: boolean;
 }
 
-export default function Toolbar({ downloadable = false, chartable = true }: ToolbarProps) {
+export default function Toolbar({ downloadable = false, chartable = true, showFileName = true }: ToolbarProps) {
   const fileName = useViewerStore((s) => s.fileName);
   const activeCell = useViewerStore((s) => s.activeCell);
   const activeSheet = useViewerStore((s) => s.activeSheet);
@@ -37,19 +38,21 @@ export default function Toolbar({ downloadable = false, chartable = true }: Tool
 
   return (
     <div className="sv-toolbar">
-      <div className="sv-toolbar-left">
-        <div className="sv-toolbar-logo">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#0f9d58" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-            <line x1="3" y1="9" x2="21" y2="9" />
-            <line x1="3" y1="15" x2="21" y2="15" />
-            <line x1="9" y1="3" x2="9" y2="21" />
-          </svg>
+      {showFileName && (
+        <div className="sv-toolbar-left">
+          <div className="sv-toolbar-logo">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#0f9d58" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+              <line x1="3" y1="9" x2="21" y2="9" />
+              <line x1="3" y1="15" x2="21" y2="15" />
+              <line x1="9" y1="3" x2="9" y2="21" />
+            </svg>
+          </div>
+          <div className="sv-toolbar-file-info">
+            <span className="sv-toolbar-filename">{fileName || 'Sheet Viewer'}</span>
+          </div>
         </div>
-        <div className="sv-toolbar-file-info">
-          <span className="sv-toolbar-filename">{fileName || 'Sheet Viewer'}</span>
-        </div>
-      </div>
+      )}
 
       <div className="sv-toolbar-center">
         {fileName && (

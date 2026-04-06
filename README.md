@@ -12,13 +12,18 @@ A high-performance React component for viewing and editing Excel and CSV files w
 
 - **File format support** — `.xlsx`, `.xls`, and `.csv` parsed entirely client-side
 - **Virtualized grid** — row and column virtualization via TanStack Virtual; renders 100k+ rows smoothly
-- **Google Sheets-like UI** — column headers (A, B, ... Z, AA, AB ...), row numbers, sticky headers, sheet tabs, formula bar, status bar
+- **Google Sheets-like UI** — column headers (A, B, ... Z, AA ...), row numbers, sticky headers, sheet tabs, formula bar, status bar
 - **View & edit modes** — read-only viewing or inline cell editing, controlled via props
 - **Multiple sheets** — tab-based sheet switching with per-sheet selection state
 - **Range highlighting** — pass Excel-style references like `A1:D10` to highlight and scroll into view
+- **Custom highlight colors** — override the selection fill and border color via props
+- **Separate search highlight** — Ctrl+F search uses its own independent highlight with customizable colors
+- **Grid lines** — data-driven visible borders on arbitrary ranges (like Excel's "All Borders")
+- **Theme system** — override the entire library color palette via a single `theme` prop object
+- **Show/hide toolbar** — control full toolbar visibility with `showToolbar`, or hide only the filename with `showFileName`
 - **Embedded charts** — extracts charts from Excel files and renders them as floating overlays using Chart.js
 - **Pivot table reconstruction** — reads pivot table definitions from XLSX internals and reconstructs the output
-- **Search** — Ctrl+F search across the active sheet
+- **Search** — Ctrl+F search across the active sheet with dedicated highlight colors
 - **Download** — export the current data as `.xlsx` or `.csv`
 - **Charts from selection** — select a data range and create bar, line, pie, or area charts dynamically
 - **Copy & paste with formatting** — Ctrl+C/V with both HTML (preserving styles) and TSV clipboard formats
@@ -30,10 +35,11 @@ A high-performance React component for viewing and editing Excel and CSV files w
 - **Conditional formatting** — rule-based cell styling (value comparisons, color scales, data bars)
 - **Data validation** — input validation with dropdown lists, number/date ranges, and error UI
 - **Formula engine** — parse and evaluate Excel-style formulas (24 built-in functions: SUM, IF, VLOOKUP, etc.)
-- **Imperative API** — access sheet data, navigate sheets, resize columns, manage comments, and more via ref
+- **Imperative API** — access sheet data, navigate sheets, resize columns, manage comments, undo/redo, and more via ref
+- **Selection callback with DOM info** — `onSelectionChange` provides the anchor cell's `HTMLElement` and `DOMRect`
 - **Highlightable** — disable all cell/range highlight visuals with `highlightable={false}`
 - **Sheet select callback** — `onSheetSelect` fires when the user clicks a sheet tab
-- **Large cell content** — active cell expands to show full text (Google Sheets-style); inactive cells truncate with ellipsis
+- **Large cell content** — active cell expands to show full text (Google Sheets-style)
 - **Instance isolation** — multiple `<SheetViewer />` components on the same page are fully independent
 - **Nested container support** — horizontal trackpad/mouse scrolling works in nested scrollable containers
 - **Zero global styles** — all CSS scoped under `.sheet-viewer` with `sv-` prefixed classes
@@ -103,12 +109,20 @@ The `source` prop accepts multiple formats:
 | `source` | `string \| File \| ArrayBuffer \| ArrayBufferView` | — | Data source to load |
 | `mode` | `'view' \| 'edit'` | `'view'` | View-only or editable mode |
 | `activeSheet` | `string` | — | Controlled active sheet name |
-| `highlight` | `string` | — | Excel-style range to highlight (e.g. `"A1:D10"`, `"B:B"`, `"3:3"`) |
-| `highlightable` | `boolean` | `true` | Enable cell/range highlighting visuals. When `false`, no highlights are shown |
+| `highlight` | `string` | — | Excel-style range to highlight (e.g. `"A1:D10"`) |
+| `highlightColor` | `string` | — | Custom fill color for the highlighted range (e.g. `"rgba(255,0,0,0.1)"`) |
+| `highlightBorderColor` | `string` | — | Custom border color for the highlighted range (e.g. `"#ff0000"`) |
+| `highlightable` | `boolean` | `true` | When `false`, all selection/highlight visuals are suppressed |
+| `gridLines` | `GridLineConfig[]` | — | Draw visible cell borders on specific ranges (like Excel's All Borders) |
+| `showToolbar` | `boolean` | `true` | Show or hide the entire toolbar row |
+| `showFileName` | `boolean` | `true` | Show or hide only the filename/logo in the toolbar. Charts & Download remain visible |
+| `theme` | `SheetViewerTheme` | — | Override the entire color palette of the library |
+| `searchMatchColor` | `string` | — | Background color for search match cells (default: `rgba(255,213,79,0.35)`) |
+| `searchActiveColor` | `string` | — | Background color for the active/current search match (default: `rgba(255,152,0,0.55)`) |
 | `onSheetChange` | `(sheetName: string) => void` | — | Called when the user switches sheets |
 | `onSheetSelect` | `(sheetName: string) => void` | — | Called when the user clicks a sheet tab |
 | `onCellChange` | `(sheet, row, col, value) => void` | — | Called when a cell is edited |
-| `onSelectionChange` | `(ranges: CellRange[]) => void` | — | Called when selection changes |
+| `onSelectionChange` | `(ranges: CellRange[], cellInfo?) => void` | — | Called when selection changes; includes anchor cell element + bounding rect |
 | `downloadable` | `boolean` | `false` | Show a download button in the toolbar |
 | `chartable` | `boolean` | `true` | Show Charts button in toolbar |
 | `searchable` | `boolean` | `true` | Enable Ctrl+F search |
@@ -142,17 +156,24 @@ function App() {
     const rangeData = ref.current?.getCellRangeData('A1:C10');
     console.log(rangeData); // CellValue[][] | null
 
+    // Get data for the current mouse/drag selection
+    const selData = ref.current?.getSelectedRangeData();
+
     // Switch to a specific sheet
     ref.current?.setActiveSheet('Sheet2');
 
-    // Highlight a range
+    // Highlight a range (triggers onSelectionChange)
     ref.current?.setHighlight('A1:F20');
 
     // Highlight silently (does NOT trigger onSelectionChange)
     ref.current?.setHighlight('A1:F20', { silent: true });
 
-    // Get current highlight/selection
+    // Get the current highlight/selection range string
     const range = ref.current?.getHighlight(); // e.g. "A1:D10" or null
+
+    // Undo / redo
+    if (ref.current?.canUndo()) ref.current.undo();
+    if (ref.current?.canRedo()) ref.current.redo();
   };
 
   return (
@@ -173,14 +194,14 @@ function App() {
 | `getActiveSheet()` | `string \| null` | Currently active sheet name |
 | `getAllSheets()` | `Record<string, SheetData>` | All parsed sheets |
 | `getFileName()` | `string \| null` | The loaded file name |
-| `getCellRangeData(range, name?)` | `CellValue[][] \| null` | Get data for an Excel-style range (e.g. `"A1:C10"`) |
-| `getSelectedRangeData()` | `CellValue[][] \| null` | Get data for the current mouse/drag selection |
+| `getCellRangeData(range, name?)` | `CellValue[][] \| null` | Get data for an Excel-style range |
+| `getSelectedRangeData()` | `CellValue[][] \| null` | Get data for the current drag selection |
 | `setActiveSheet(name)` | `void` | Switch to a sheet |
-| `setHighlight(range, options?)` | `void` | Highlight a cell range. Pass `{ silent: true }` to suppress `onSelectionChange` |
-| `getHighlight()` | `string \| null` | Get the current highlight/selection range (e.g. `"A1:D10"`) |
+| `setHighlight(range, options?)` | `void` | Highlight a range. `{ silent: true }` suppresses `onSelectionChange` |
+| `getHighlight()` | `string \| null` | Current highlight/selection range string (e.g. `"A1:D10"`) |
 | `setColumnWidth(col, width, name?)` | `void` | Set column width in pixels (min 30px) |
 | `setRowHeight(row, height, name?)` | `void` | Set row height in pixels (min 20px) |
-| `getCellComment(cellRef, name?)` | `CellComment \| null` | Get comment for a cell (e.g. `"A1"`) |
+| `getCellComment(cellRef, name?)` | `CellComment \| null` | Get comment for a cell |
 | `setCellComment(cellRef, text, author?, name?)` | `void` | Set or remove a cell comment |
 | `undo()` | `void` | Undo the last cell edit or paste |
 | `redo()` | `void` | Redo the last undone edit |
@@ -189,67 +210,169 @@ function App() {
 
 ---
 
-## Types
+## Custom Highlight Colors
 
-All types are exported for use in your application:
+Override the default blue selection with any fill and border color:
 
 ```tsx
-import type {
-  SheetViewerProps,
-  SheetViewerHandle,
-  SheetViewerSource,
-  SheetViewerMode,
-  SheetData,
-  CellRange,
-  CellValue,
-  CellComment,
-  CellStyle,
-  ChartOverlay,
-  ChartSeries,
-  ChartType,
-  ConditionalFormatRule,
-  ConditionalFormatRuleType,
-  MergeCell,
-  SelectionState,
-  UndoEntry,
-  ValidationRule,
-  ValidationRuleType,
-} from 'rc-sheet-viewer-17';
+<SheetViewer
+  source={file}
+  highlight="B2:D10"
+  highlightColor="rgba(255, 0, 0, 0.12)"
+  highlightBorderColor="#e53935"
+/>
 ```
 
-### `SheetData`
+---
 
-```typescript
-interface SheetData {
-  data: CellValue[][];                          // 2D array of cell values
-  rows: number;                                 // Total row count
-  cols: number;                                 // Total column count
-  merges: MergeCell[];                          // Merged cell ranges
-  colWidths: number[];                          // Column widths in pixels
-  rowHeights?: number[];                        // Custom row heights (sparse)
-  styles?: Record<string, CellStyle>;           // Cell styles keyed by "row,col"
-  comments?: Record<string, CellComment>;       // Cell comments keyed by "row,col"
-  conditionalFormats?: ConditionalFormatRule[];  // Conditional formatting rules
-  validations?: Record<string, ValidationRule>; // Data validation rules keyed by "row,col"
+## Grid Lines
+
+Draw visible Excel-style cell borders on arbitrary ranges:
+
+```tsx
+import type { GridLineConfig } from 'rc-sheet-viewer-17';
+
+const gridLines: GridLineConfig[] = [
+  // Bold blue header row with background
+  { range: 'A1:F1', borderColor: '#1a73e8', borderWidth: 2, bgColor: '#e8f0fe' },
+  // Light gray border for all data cells
+  { range: 'A2:F50', borderColor: '#dadce0', borderWidth: 1 },
+  // Dashed red highlight zone
+  { range: 'C2:C50', borderColor: '#ea4335', borderWidth: 1, borderStyle: 'dashed' },
+];
+
+<SheetViewer source={file} gridLines={gridLines} />
+```
+
+### `GridLineConfig` fields
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `range` | `string` | required | Excel-style range e.g. `"A1:D10"` |
+| `borderColor` | `string` | `var(--sv-color-border)` | Border color |
+| `borderWidth` | `number` | `1` | Border width in pixels |
+| `borderStyle` | `'solid' \| 'dashed' \| 'dotted'` | `'solid'` | Border style |
+| `bgColor` | `string` | — | Optional background fill for cells in this range |
+
+---
+
+## Theme Customization
+
+Override the entire library color palette with a `theme` prop:
+
+```tsx
+import type { SheetViewerTheme } from 'rc-sheet-viewer-17';
+
+const darkTheme: SheetViewerTheme = {
+  bgColor: '#1e1e2e',
+  surfaceColor: '#181825',
+  borderColor: '#313244',
+  borderLightColor: '#45475a',
+  textColor: '#cdd6f4',
+  textSecondaryColor: '#a6adc8',
+  textMutedColor: '#6c7086',
+  primaryColor: '#89b4fa',
+  primaryLightColor: '#313244',
+  primaryBgColor: '#1e1e2e',
+  selectionColor: 'rgba(137,180,250,0.15)',
+  selectionHoverColor: 'rgba(137,180,250,0.25)',
+  headerBgColor: '#181825',
+  headerTextColor: '#a6adc8',
+  hoverColor: '#313244',
+};
+
+<SheetViewer source={file} theme={darkTheme} />
+```
+
+### `SheetViewerTheme` fields
+
+| Field | CSS Variable | Description |
+|---|---|---|
+| `bgColor` | `--sv-color-bg` | Main background color |
+| `surfaceColor` | `--sv-color-surface` | Secondary background (toolbars, headers) |
+| `borderColor` | `--sv-color-border` | Default border color |
+| `borderLightColor` | `--sv-color-border-light` | Light border color |
+| `textColor` | `--sv-color-text` | Primary text color |
+| `textSecondaryColor` | `--sv-color-text-secondary` | Secondary text color |
+| `textMutedColor` | `--sv-color-text-muted` | Muted/placeholder text |
+| `primaryColor` | `--sv-color-primary` | Primary accent color |
+| `primaryLightColor` | `--sv-color-primary-light` | Light primary variant |
+| `primaryBgColor` | `--sv-color-primary-bg` | Very light primary background |
+| `selectionColor` | `--sv-color-selection` | Range selection fill color |
+| `selectionHoverColor` | `--sv-color-selection-hover` | Range selection fill on hover |
+| `headerBgColor` | `--sv-color-header-bg` | Column/row header background |
+| `headerTextColor` | `--sv-color-header-text` | Column/row header text |
+| `hoverColor` | `--sv-color-hover` | Cell hover background |
+
+You can also override these directly in CSS:
+
+```css
+.sheet-viewer {
+  --sv-color-primary: #7c3aed;
+  --sv-color-selection: rgba(124, 58, 237, 0.1);
 }
 ```
 
-### `CellRange`
+---
 
-```typescript
-interface CellRange {
-  startRow: number;   // 0-based, inclusive
-  startCol: number;
-  endRow: number;
-  endCol: number;
-}
+## Search Highlight Colors
+
+Customize the colors used to highlight search matches independently from the selection:
+
+```tsx
+<SheetViewer
+  source={file}
+  searchMatchColor="rgba(255, 213, 79, 0.45)"     // all matches — yellow
+  searchActiveColor="rgba(255, 152, 0, 0.7)"      // current match — orange
+/>
+```
+
+Press Ctrl+F (Cmd+F) to open search. Matches are shown with a dedicated highlight that does **not** interfere with the user's cell selection.
+
+**Priority:** Search match highlights always take precedence over the range selection highlight — if a cell is both selected and a search match, the search color wins.
+
+---
+
+## Show / Hide Toolbar
+
+```tsx
+// Hide the entire toolbar row
+<SheetViewer source={file} showToolbar={false} />
+
+// Hide just the filename/logo, keep Charts and Download buttons
+<SheetViewer source={file} showFileName={false} downloadable chartable />
+
+// Show everything (defaults)
+<SheetViewer source={file} showToolbar={true} showFileName={true} downloadable chartable />
+```
+
+`showToolbar={false}` removes the whole toolbar row. `showFileName={false}` keeps the toolbar but hides only the logo and filename text, leaving Charts and Download visible.
+
+---
+
+## Selection Callback with Cell DOM Info
+
+`onSelectionChange` now provides the DOM element and bounding rect of the anchor cell, useful for positioning custom popovers or tooltips:
+
+```tsx
+<SheetViewer
+  source={file}
+  onSelectionChange={(ranges, cellInfo) => {
+    console.log('Selected ranges:', ranges);
+    if (cellInfo) {
+      console.log('Anchor element:', cellInfo.element);
+      console.log('Bounding rect:', cellInfo.rect);
+      // e.g. position a tooltip at cellInfo.rect.bottom, cellInfo.rect.left
+    }
+  }}
+/>
 ```
 
 ---
 
 ## Highlight Syntax
 
-The `highlight` prop, `setHighlight` method, and `getHighlight` method work with Excel-style cell references:
+The `highlight` prop, `setHighlight` method, and `getHighlight` method all use Excel-style cell references:
 
 | Expression | Meaning |
 |---|---|
@@ -281,72 +404,91 @@ Double-click a cell to start editing. Press Enter to confirm or Escape to cancel
 
 ## Copy & Paste with Formatting
 
-The component supports Excel-compatible clipboard operations with style preservation:
-
-- **Ctrl+C** (Cmd+C on Mac) — copies the selected range as both HTML (with inline styles for colors, bold, italic) and TSV (tab-separated values)
-- **Ctrl+V** (Cmd+V on Mac) — pastes from clipboard. HTML is preferred (preserving styles); falls back to TSV for plain-text sources
+- **Ctrl+C** (Cmd+C on Mac) — copies the selected range as HTML (with inline styles) and TSV
+- **Ctrl+V** (Cmd+V on Mac) — pastes HTML (preferred, preserves styles) or plain TSV
 - **Escape** — clears the marching ants copy indicator
 
-No additional configuration needed. Copy works in both view and edit modes; paste requires `mode="edit"`.
+Paste requires `mode="edit"`.
+
+---
 
 ## Large Cell Content
 
-When a cell contains long text, inactive cells show truncated content with ellipsis. When you select a cell (click it), the full content expands to display—similar to Google Sheets. The formula bar always shows the complete value.
+When a cell contains long text, inactive cells truncate with ellipsis. Clicking a cell expands it to show the full content — identical to Google Sheets behavior. The formula bar always shows the complete value.
+
+---
 
 ## Undo & Redo
 
-- **Ctrl+Z** (Cmd+Z on Mac) — undo the last cell edit or paste
+- **Ctrl+Z** (Cmd+Z) — undo
 - **Ctrl+Y** or **Ctrl+Shift+Z** — redo
 
-Also available programmatically:
+Also available via ref:
 
 ```tsx
 if (ref.current?.canUndo()) ref.current.undo();
 if (ref.current?.canRedo()) ref.current.redo();
 ```
 
+---
+
 ## Column & Row Resizing
 
-Drag the right edge of column headers or bottom edge of row headers to resize. Minimum column width: 30px, minimum row height: 20px. Also available programmatically via ref:
+Drag the right edge of column headers or the bottom edge of row headers to resize. Minimum column: 30px, minimum row: 20px.
+
+Programmatic control:
 
 ```tsx
-ref.current?.setColumnWidth(0, 200);  // Set column A to 200px
-ref.current?.setRowHeight(0, 50);     // Set row 1 to 50px
+ref.current?.setColumnWidth(0, 200);  // Column A → 200px
+ref.current?.setRowHeight(0, 50);     // Row 1 → 50px
 ```
+
+---
 
 ## Cell Comments
 
-Cells with comments display a red triangle indicator in the top-right corner. Hover to see the comment text and author. Manage comments programmatically:
+Cells with comments display a red triangle in the top-right corner. Hover to see the comment. Manage via ref:
 
 ```tsx
 ref.current?.setCellComment('A1', 'Review this value', 'Alice');
 const comment = ref.current?.getCellComment('A1');
-ref.current?.setCellComment('A1', null);  // Remove comment
+ref.current?.setCellComment('A1', null);  // Remove
 ```
+
+---
 
 ## Conditional Formatting
 
-Apply visual styles based on cell values. Rules are evaluated at render time and overlay the base cell style:
-
 ```typescript
 const rules: ConditionalFormatRule[] = [
-  { type: 'greaterThan', range: { startRow: 0, startCol: 0, endRow: 99, endCol: 0 }, values: [100], style: { bgColor: '#e6f4ea', fontColor: '#137333' } },
-  { type: 'colorScale', range: { startRow: 0, startCol: 1, endRow: 99, endCol: 1 }, colorScale: ['#f4cccc', '#fce8b2', '#b7e1cd'] },
+  {
+    type: 'greaterThan',
+    range: { startRow: 0, startCol: 0, endRow: 99, endCol: 0 },
+    values: [100],
+    style: { bgColor: '#e6f4ea', fontColor: '#137333' },
+  },
+  {
+    type: 'colorScale',
+    range: { startRow: 0, startCol: 1, endRow: 99, endCol: 1 },
+    colorScale: ['#f4cccc', '#fce8b2', '#b7e1cd'],
+  },
 ];
 ```
 
 Supported rule types: `greaterThan`, `lessThan`, `between`, `equalTo`, `textContains`, `top10`, `bottom10`, `colorScale`, `dataBar`.
 
-## Data Validation
+---
 
-Restrict cell input with validation rules. List validation renders a dropdown; invalid input shows a red border and error tooltip:
+## Data Validation
 
 ```typescript
 const validations: Record<string, ValidationRule> = {
   '0,0': { type: 'list', listItems: ['High', 'Medium', 'Low'] },
-  '0,1': { type: 'number', min: 0, max: 100, errorMessage: 'Must be 0-100' },
+  '0,1': { type: 'number', min: 0, max: 100, errorMessage: 'Must be 0–100' },
 };
 ```
+
+---
 
 ## Formula Engine
 
@@ -359,21 +501,45 @@ Parse and evaluate Excel-style formulas. 24 built-in functions:
 | Text | `CONCATENATE`, `LEFT`, `RIGHT`, `MID`, `LEN`, `UPPER`, `LOWER`, `TRIM` |
 | Lookup | `VLOOKUP`, `HLOOKUP`, `INDEX`, `MATCH` |
 
-```typescript
-import { parseFormula, evaluate } from 'rc-sheet-viewer-17/formula'; // formula engine
-```
-
 ---
 
-## Merged Cells
+## Types
 
-Merged cell ranges from Excel files are automatically rendered as single visual cells spanning the appropriate rows and columns. No configuration is required — merges are detected from the file metadata and rendered in the grid.
+All types are exported:
+
+```tsx
+import type {
+  SheetViewerProps,
+  SheetViewerHandle,
+  SheetViewerSource,
+  SheetViewerMode,
+  SheetViewerTheme,
+  SheetData,
+  CellRange,
+  CellValue,
+  CellComment,
+  CellStyle,
+  ChartOverlay,
+  ChartSeries,
+  ChartType,
+  ConditionalFormatRule,
+  ConditionalFormatRuleType,
+  GridLineConfig,
+  GridLineBorderStyle,
+  ParsedGridLineConfig,
+  MergeCell,
+  SelectionState,
+  UndoEntry,
+  ValidationRule,
+  ValidationRuleType,
+} from 'rc-sheet-viewer-17';
+```
 
 ---
 
 ## Multiple Instances
 
-Each `<SheetViewer />` is fully isolated with its own state. You can render as many as you want on one page:
+Each `<SheetViewer />` is fully isolated with its own state:
 
 ```tsx
 <div style={{ display: 'flex', gap: 16 }}>
@@ -386,22 +552,20 @@ Each `<SheetViewer />` is fully isolated with its own state. You can render as m
 
 ## Styling
 
-The component ships with a single CSS file. Import it once:
+Import the CSS once:
 
 ```tsx
 import 'rc-sheet-viewer-17/style.css';
 ```
 
-All classes are scoped under `.sheet-viewer` and prefixed with `sv-`. The component uses CSS custom properties for theming. Override them on the `.sheet-viewer` selector:
+All classes are scoped under `.sheet-viewer` and prefixed with `sv-`. Override CSS variables via the `theme` prop or directly in CSS:
 
 ```css
 .sheet-viewer {
-  --sv-color-bg: #1e1e1e;
-  --sv-color-surface: #2d2d2d;
-  --sv-color-text: #d4d4d4;
-  --sv-color-border: #404040;
-  --sv-color-primary: #569cd6;
-  /* ... see sheet-viewer.css for all variables */
+  --sv-color-bg: #1e1e2e;
+  --sv-color-primary: #89b4fa;
+  --sv-search-match-color: rgba(137, 180, 250, 0.3);
+  --sv-search-active-color: rgba(137, 180, 250, 0.6);
 }
 ```
 
@@ -414,71 +578,20 @@ All classes are scoped under `.sheet-viewer` and prefixed with `sv-`. The compon
 - Node.js 18+
 - pnpm 8+
 
-### Setup
-
-```bash
-git clone https://github.com/your-username/react-sheet-viewer.git
-cd react-sheet-viewer
-pnpm install
-```
-
 ### Commands
 
 ```bash
 pnpm dev              # Start demo app (dev server)
 pnpm build            # Build demo app
-pnpm build:lib        # Build library package (dist/sheet-viewer.js + .css)
-pnpm typecheck        # TypeScript type checking (strict)
-pnpm test             # Run all tests (Vitest)
-pnpm test:watch       # Run tests in watch mode
+pnpm build:lib        # Build library package
+pnpm typecheck        # TypeScript type checking
+pnpm test             # Run all tests
+pnpm test:watch       # Tests in watch mode
 pnpm lint             # ESLint
-pnpm storybook        # Start Storybook at localhost:6006
-pnpm build-storybook  # Build static Storybook
-pnpm chromatic        # Visual regression tests (requires CHROMATIC_PROJECT_TOKEN)
+pnpm storybook        # Storybook at localhost:6006
+pnpm build-storybook  # Static Storybook build
+pnpm chromatic        # Visual regression tests
 ```
-
-### Project Structure
-
-```
-src/
-├── lib/                    # The library (published package)
-│   ├── index.ts            # Public exports
-│   ├── SheetViewer.tsx     # Root component
-│   ├── types.ts            # All TypeScript types
-│   ├── context/            # Zustand store (instance-scoped)
-│   ├── hooks/              # useSourceLoader, useFileParser
-│   ├── components/         # UI components (Grid, Toolbar, Tabs, etc.)
-│   ├── utils/              # Parsers, download, range logic
-│   └── styles/             # CSS (sheet-viewer.css)
-├── demo/                   # Demo app with file upload (not in the package)
-└── main.tsx                # Demo entry point
-stories/                    # Storybook stories
-```
-
-### Architecture
-
-1. **Source loading** (`useSourceLoader`) — normalizes URL / File / ArrayBuffer into a raw buffer
-2. **Parsing** (`useFileParser`) — main-thread async parsing with `requestAnimationFrame` yields for UI responsiveness. Dynamically imports `xlsx` for code-splitting
-3. **State** (`ViewerContext`) — instance-scoped Zustand store via `createStore()` + React Context
-4. **Rendering** (`VirtualGrid`) — dual row/column virtualization with `@tanstack/react-virtual`
-5. **Advanced features** — pivot table reconstruction and chart extraction read raw XLSX XML via `fflate`
-
----
-
-## Tech Stack
-
-| Layer | Choice |
-|---|---|
-| Framework | React 17 / 18 / 19 |
-| Language | TypeScript (strict) |
-| Build | Vite 7 |
-| State | Zustand 5 |
-| Virtualization | @tanstack/react-virtual 3 |
-| Excel Parsing | xlsx (SheetJS) |
-| Charts | Chart.js + react-chartjs-2 |
-| ZIP | fflate |
-| Testing | Vitest + React Testing Library |
-| Visual Testing | Storybook + Chromatic |
 
 ---
 

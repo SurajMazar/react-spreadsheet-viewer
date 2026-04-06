@@ -26,6 +26,8 @@ function createViewerStore(): StoreApi<ViewerState> {
     showChartPanel: false,
     chartType: 'bar',
     copiedRange: null,
+    searchMatches: [],
+    searchActiveIndex: 0,
     undoStack: [],
     redoStack: [],
     mode: 'view' as SheetViewerMode,
@@ -97,6 +99,9 @@ function createViewerStore(): StoreApi<ViewerState> {
     toggleChartPanel: () => set((s) => ({ showChartPanel: !s.showChartPanel })),
     setChartType: (chartType: string) => set({ chartType }),
     setCopiedRange: (range: CellRange | null) => set({ copiedRange: range }),
+    setSearchMatches: (matches: { row: number; col: number }[]) =>
+      set({ searchMatches: matches, searchActiveIndex: 0 }),
+    setSearchActiveIndex: (index: number) => set({ searchActiveIndex: index }),
     setColumnWidth: (sheetName: string, colIndex: number, width: number) => {
       const state = get();
       const sheet = state.sheets[sheetName];
