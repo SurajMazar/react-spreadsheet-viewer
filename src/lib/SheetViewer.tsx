@@ -123,8 +123,9 @@ function SheetViewerInner({
     if (searchActiveColor) vars['--sv-search-active-color'] = searchActiveColor;
     // Highlight fill color via CSS variable (overrides the !important in .sv-cell-in-range)
     if (highlightColor) vars['--sv-highlight-color'] = highlightColor;
+    if (highlightBorderColor) vars['--sv-highlight-border-color'] = highlightBorderColor;
     return vars as CSSProperties;
-  }, [theme, searchMatchColor, searchActiveColor]);
+  }, [theme, searchMatchColor, searchActiveColor, highlightColor, highlightBorderColor]);
 
   // Expose imperative handle via ref
   useImperativeHandle(forwardedRef, () => ({
