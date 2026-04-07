@@ -20,6 +20,8 @@ export interface CellProps {
   highlightColor?: string;
   /** Custom border color for selected range borders (overrides CSS variable) */
   highlightBorderColor?: string;
+  /** True when the highlight was set programmatically (shows tint even for single-cell) */
+  isProgrammaticHighlight?: boolean;
   /** True when this cell is a non-active search match */
   isSearchMatch?: boolean;
   /** True when this cell is the active/current search match */
@@ -47,6 +49,7 @@ const Cell = memo(function Cell({
   style,
   highlightColor,
   highlightBorderColor,
+  isProgrammaticHighlight = false,
   isSearchMatch = false,
   isSearchActive = false,
   gridLineBorders,
@@ -57,16 +60,18 @@ const Cell = memo(function Cell({
   const isActive =
     activeCell != null && activeCell.row === rowIndex && activeCell.col === columnIndex;
 
-  // A single-cell range (1x1) is visually treated as just a focused cell — outline only, no tint.
   const isSingleCellRange = ranges.length === 1
     && ranges[0].startRow === ranges[0].endRow
     && ranges[0].startCol === ranges[0].endCol;
 
+  // User-click single-cell: outline only. Programmatic single-cell: show full tint.
+  const suppressSingleCellTint = isSingleCellRange && !isProgrammaticHighlight;
+
   // Search match always takes priority over range highlight visually.
   const isAnySearchHit = isSearchMatch || isSearchActive;
-  const showInRangeTint = isInRange && !isActive && !isSingleCellRange && !isAnySearchHit;
-  const showActiveInRange = isActive && isInRange && !isSingleCellRange && !isAnySearchHit;
-  const showActiveOutline = isActive && !isAnySearchHit && (!isInRange || isSingleCellRange);
+  const showInRangeTint = isInRange && !isActive && !suppressSingleCellTint && !isAnySearchHit;
+  const showActiveInRange = isActive && isInRange && !suppressSingleCellTint && !isAnySearchHit;
+  const showActiveOutline = isActive && !isAnySearchHit && (!isInRange || suppressSingleCellTint);
 
   let className = 'sv-cell';
   if (showActiveOutline) className += ' sv-cell-active';
@@ -94,9 +99,21 @@ const Cell = memo(function Cell({
     if (cellStyle.textAlign) mergedStyle.textAlign = cellStyle.textAlign;
   }
 
+  // Apply highlight fill color inline so it wins over cellStyle.bgColor and CSS classes
+  if (highlightColor && (showInRangeTint || showActiveInRange || showActiveOutline)) {
+    mergedStyle.backgroundColor = highlightColor;
+  }
+
+  // Active cell outline uses the same highlight border color for consistency
+  if (showActiveOutline) {
+    const outlineColor = highlightBorderColor || 'var(--sv-color-primary)';
+    mergedStyle.outline = `2px solid ${outlineColor}`;
+    mergedStyle.outlineOffset = '-1px';
+  }
+
   // Selection range border override
   const borderColor = highlightBorderColor || 'var(--sv-color-primary)';
-  if (borders) {
+  if (borders && !suppressSingleCellTint) {
     if (borders.top) mergedStyle.borderTop = `2px solid ${borderColor}`;
     if (borders.bottom) mergedStyle.borderBottom = `2px solid ${borderColor}`;
     if (borders.left) mergedStyle.borderLeft = `2px solid ${borderColor}`;

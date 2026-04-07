@@ -168,7 +168,9 @@ function SheetViewerInner({
         return;
       }
       withOptionalSilentSelection(options, () => {
+        s.setProgrammaticHighlight(true);
         s.setSelectionRanges(activeSheet, ranges, range);
+        s.setActiveCell(ranges[0].startRow, ranges[0].startCol);
       });
     },
     clearHighlight: (options?: { silent?: boolean }) => {
@@ -279,18 +281,25 @@ function SheetViewerInner({
     }
   }, [controlledSheet, internalActiveSheet, setActiveSheet]);
 
-  // Sync highlight prop
+  // Track previous highlight prop to detect prop-driven transitions only
+  const prevHighlightRef = useReactRef<string | undefined>(highlight);
+
+  // Sync highlight prop — only reacts to prop changes, never clears imperative highlights
   useEffect(() => {
     if (!internalActiveSheet || !sheetData) return;
+    const prev = prevHighlightRef.current;
+    prevHighlightRef.current = highlight;
+
     if (!highlight) {
-      const currentSelection = storeApi.getState().selections[internalActiveSheet];
-      if (currentSelection?.ranges.length || currentSelection?.rangeInput) {
+      // Only clear if highlight prop transitioned from a value to empty/undefined
+      if (prev) {
         clearHighlightInStore();
       }
       return;
     }
     const ranges = parseRangeExpression(highlight, sheetData.rows, sheetData.cols);
     if (ranges.length > 0) {
+      storeApi.getState().setProgrammaticHighlight(true);
       setSelectionRanges(internalActiveSheet, ranges, highlight);
     }
   }, [highlight, internalActiveSheet, sheetData, setSelectionRanges, storeApi]);

@@ -50,6 +50,8 @@ export default function VirtualGrid({
   const undo = useViewerStore((s) => s.undo);
   const redo = useViewerStore((s) => s.redo);
   const mode = useViewerStore((s) => s.mode);
+  const isProgrammaticHighlight = useViewerStore((s) => s.isProgrammaticHighlight);
+  const setProgrammaticHighlight = useViewerStore((s) => s.setProgrammaticHighlight);
 
   const currentSelection = useViewerStore(
     (s) => (s.activeSheet ? s.selections[s.activeSheet] : null) ?? EMPTY_SELECTION
@@ -181,6 +183,7 @@ export default function VirtualGrid({
   const onCellClick = useCallback(
     (row: number, col: number) => {
       setEditingCell(null);
+      setProgrammaticHighlight(false);
       setActiveCell(row, col);
       const label = `${colIndexToLetter(col)}${row + 1}`;
       if (activeSheet) {
@@ -188,7 +191,7 @@ export default function VirtualGrid({
         setSelectionRanges(activeSheet, [singleRange], label);
       }
     },
-    [activeSheet, setActiveCell, setSelectionRanges]
+    [activeSheet, setActiveCell, setSelectionRanges, setProgrammaticHighlight]
   );
 
   const onCellDoubleClick = useCallback(
@@ -312,6 +315,7 @@ export default function VirtualGrid({
       }
 
       e.preventDefault();
+      setProgrammaticHighlight(false);
       setActiveCell(newRow, newCol);
       const label = `${colIndexToLetter(newCol)}${newRow + 1}`;
       if (activeSheet) {
@@ -322,7 +326,7 @@ export default function VirtualGrid({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activeCell, sheetData, activeSheet, setActiveCell, setSelectionRanges, effectiveRows, effectiveCols, dataRows, dataCols, mode, editingCell]);
+  }, [activeCell, sheetData, activeSheet, setActiveCell, setSelectionRanges, setProgrammaticHighlight, effectiveRows, effectiveCols, dataRows, dataCols, mode, editingCell]);
 
   // Copy/Paste handlers (Ctrl+C / Ctrl+V / Cmd+C / Cmd+V) and Escape to clear copy indicator
   useEffect(() => {
@@ -699,6 +703,7 @@ export default function VirtualGrid({
                   onCellDoubleClick={onCellDoubleClick}
                   highlightColor={highlightColor}
                   highlightBorderColor={highlightBorderColor}
+                  isProgrammaticHighlight={isProgrammaticHighlight}
                   isSearchMatch={isSearchMatch}
                   isSearchActive={isSearchActive}
                   gridLineBorders={cellGridLines && cellGridLines.length > 0 ? cellGridLines : undefined}

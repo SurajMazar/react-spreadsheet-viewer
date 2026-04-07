@@ -127,7 +127,8 @@ export default function DemoApp() {
 
   // Viewer controls
   const [mode, setMode] = useState<SheetViewerMode>('view');
-  const [highlight, setHighlight] = useState('');
+  const [highlightInput, setHighlightInput] = useState('');
+  const [highlight, setHighlight] = useState<string | undefined>(undefined);
   const [highlightColor, setHighlightColor] = useState('');
   const [highlightBorderColor, setHighlightBorderColor] = useState('');
   const [highlightable, setHighlightable] = useState(true);
@@ -230,14 +231,18 @@ export default function DemoApp() {
   // ─── Ref actions ─────────────────────────────────────────────────────────────
 
   const applyHighlight = () => {
-    if (highlight) viewerRef.current?.setHighlight(highlight);
+    if (highlightInput) {
+      setHighlight(highlightInput);
+      viewerRef.current?.setHighlight(highlightInput);
+    }
   };
 
   const silentHighlight = () => {
-    if (highlight) viewerRef.current?.setHighlight(highlight, { silent: true });
+    if (highlightInput) viewerRef.current?.setHighlight(highlightInput, { silent: true });
   };
 
   const clearHighlight = () => {
+    setHighlight(undefined);
     viewerRef.current?.clearHighlight();
     setSelectionInfo(null);
   };
@@ -307,7 +312,7 @@ export default function DemoApp() {
             ref={viewerRef}
             source={source}
             mode={mode}
-            highlight={highlight || undefined}
+            highlight={highlight}
             highlightColor={highlightColor || undefined}
             highlightBorderColor={highlightBorderColor || undefined}
             highlightable={highlightable}
@@ -405,8 +410,8 @@ export default function DemoApp() {
                       <input
                         className="demo-input demo-input-mono"
                         type="text"
-                        value={highlight}
-                        onChange={(e) => setHighlight(e.target.value)}
+                        value={highlightInput}
+                        onChange={(e) => setHighlightInput(e.target.value)}
                         placeholder="e.g. A1:D10"
                       />
                     </div>

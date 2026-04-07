@@ -545,9 +545,7 @@
 }
 
 .sv-cell-active {
-  outline: 2px solid var(--sv-color-primary);
-  outline-offset: -1px;
-  background: var(--sv-color-bg) !important;
+  background: var(--sv-color-bg);
   z-index: 5;
   overflow: visible;
 }
@@ -572,12 +570,12 @@
   white-space: nowrap;
 }
 
-/* Active cell (no range): expand text with solid bg so it's readable over adjacent cells */
+/* Active cell (no range): expand text; transparent span avoids double-stacked fill (e.g. rgba highlight) */
 .sv-cell-active .sv-cell-text {
   flex-shrink: 0;
   overflow: visible;
   text-overflow: clip;
-  background: var(--sv-color-bg);
+  background: transparent;
   padding-right: 6px;
 }
 
