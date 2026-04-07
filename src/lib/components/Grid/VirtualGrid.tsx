@@ -184,11 +184,11 @@ export default function VirtualGrid({
       setActiveCell(row, col);
       const label = `${colIndexToLetter(col)}${row + 1}`;
       if (activeSheet) {
-        setRangeInput(activeSheet, label);
-        setSelectionRanges(activeSheet, [{ startRow: row, startCol: col, endRow: row, endCol: col }], label);
+        const singleRange = { startRow: row, startCol: col, endRow: row, endCol: col };
+        setSelectionRanges(activeSheet, [singleRange], label);
       }
     },
-    [activeSheet, setActiveCell, setRangeInput, setSelectionRanges]
+    [activeSheet, setActiveCell, setSelectionRanges]
   );
 
   const onCellDoubleClick = useCallback(
@@ -315,13 +315,14 @@ export default function VirtualGrid({
       setActiveCell(newRow, newCol);
       const label = `${colIndexToLetter(newCol)}${newRow + 1}`;
       if (activeSheet) {
-        setRangeInput(activeSheet, label);
+        const singleRange = { startRow: newRow, startCol: newCol, endRow: newRow, endCol: newCol };
+        setSelectionRanges(activeSheet, [singleRange], label);
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activeCell, sheetData, activeSheet, setActiveCell, setRangeInput, effectiveRows, effectiveCols, dataRows, dataCols, mode, editingCell]);
+  }, [activeCell, sheetData, activeSheet, setActiveCell, setSelectionRanges, effectiveRows, effectiveCols, dataRows, dataCols, mode, editingCell]);
 
   // Copy/Paste handlers (Ctrl+C / Ctrl+V / Cmd+C / Cmd+V) and Escape to clear copy indicator
   useEffect(() => {

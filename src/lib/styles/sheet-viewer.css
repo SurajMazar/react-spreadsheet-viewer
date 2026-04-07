@@ -561,7 +561,7 @@
 }
 
 .sv-cell-active-in-range {
-  background: var(--sv-color-bg) !important;
+  background: var(--sv-highlight-color, var(--sv-color-selection)) !important;
   z-index: 5;
   overflow: visible;
 }
@@ -572,13 +572,21 @@
   white-space: nowrap;
 }
 
-/* Active cell: expand text to show full content (Google Sheets behavior) */
-.sv-cell-active .sv-cell-text,
-.sv-cell-active-in-range .sv-cell-text {
+/* Active cell (no range): expand text with solid bg so it's readable over adjacent cells */
+.sv-cell-active .sv-cell-text {
   flex-shrink: 0;
   overflow: visible;
   text-overflow: clip;
   background: var(--sv-color-bg);
+  padding-right: 6px;
+}
+
+/* Active cell inside a range: expand text but keep transparent bg to match range tint */
+.sv-cell-active-in-range .sv-cell-text {
+  flex-shrink: 0;
+  overflow: visible;
+  text-overflow: clip;
+  background: transparent;
   padding-right: 6px;
 }
 

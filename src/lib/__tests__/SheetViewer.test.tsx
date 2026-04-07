@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, waitFor, screen } from '@testing-library/react';
+import { render, waitFor, screen, act } from '@testing-library/react';
 import React, { createRef } from 'react';
 import { SheetViewer } from '../index';
 import type { SheetViewerHandle, CellRange } from '../types';
@@ -199,6 +199,7 @@ describe('SheetViewer — getSelectedRangeData', () => {
     expect(data![0]).toEqual(['Name', 'Age']);
     expect(data![1]).toEqual(['Alice', '30']);
   }, 15000);
+
 });
 
 // =============================================
@@ -214,6 +215,44 @@ describe('SheetViewer — Ref navigation', () => {
 
     // Should not throw
     expect(() => ref.current?.setHighlight('A1:B2')).not.toThrow();
+  }, 15000);
+
+  it('clearHighlight removes the current highlighted range', async () => {
+    const ref = createRef<SheetViewerHandle>();
+    const file = createCsvFile(sampleCsv);
+
+    render(<SheetViewer ref={ref} source={file} height={600} width={800} />);
+    await multiSheetHelper(ref);
+
+    act(() => {
+      ref.current?.setHighlight('A1:B2');
+    });
+    expect(ref.current?.getHighlight()).toBe('A1:B2');
+
+    act(() => {
+      ref.current?.clearHighlight();
+    });
+    expect(ref.current?.getHighlight()).toBeNull();
+    expect(ref.current?.getSelectedRangeData()).toBeNull();
+  }, 15000);
+
+  it('setHighlight with an empty range clears the current highlight', async () => {
+    const ref = createRef<SheetViewerHandle>();
+    const file = createCsvFile(sampleCsv);
+
+    render(<SheetViewer ref={ref} source={file} height={600} width={800} />);
+    await multiSheetHelper(ref);
+
+    act(() => {
+      ref.current?.setHighlight('A1:B2');
+    });
+    expect(ref.current?.getHighlight()).toBe('A1:B2');
+
+    act(() => {
+      ref.current?.setHighlight('');
+    });
+    expect(ref.current?.getHighlight()).toBeNull();
+    expect(ref.current?.getSelectedRangeData()).toBeNull();
   }, 15000);
 
   it('setActiveSheet switches to a sheet', async () => {
@@ -370,6 +409,38 @@ describe('SheetViewer — Callbacks', () => {
     expect(calledRanges.length).toBeGreaterThan(0);
     expect(calledRanges[0].startRow).toBe(0);
     expect(calledRanges[0].endRow).toBe(1);
+  }, 15000);
+
+  it('does not fire onSelectionChange when clearHighlight is silent', async () => {
+    const onSelectionChange = vi.fn();
+    const ref = createRef<SheetViewerHandle>();
+    const file = createCsvFile(sampleCsv);
+
+    render(
+      <SheetViewer
+        ref={ref}
+        source={file}
+        onSelectionChange={onSelectionChange}
+        height={600}
+        width={800}
+      />
+    );
+    await multiSheetHelper(ref);
+
+    act(() => {
+      ref.current?.setHighlight('A1:B2');
+    });
+
+    await waitFor(() => {
+      expect(onSelectionChange).toHaveBeenCalledTimes(1);
+    });
+
+    act(() => {
+      ref.current?.clearHighlight({ silent: true });
+    });
+
+    expect(ref.current?.getHighlight()).toBeNull();
+    expect(onSelectionChange).toHaveBeenCalledTimes(1);
   }, 15000);
 });
 

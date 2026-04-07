@@ -210,7 +210,10 @@ export default function DemoApp() {
 
   const handleSelectionChange = useCallback((ranges: CellRange[], cellInfo?: { element: HTMLElement; rect: DOMRect }) => {
     const first = ranges[0];
-    if (!first) return;
+    if (!first) {
+      setSelectionInfo(null);
+      return;
+    }
     const r = first;
     const toLetter = (n: number) => {
       let s = '';
@@ -232,6 +235,16 @@ export default function DemoApp() {
 
   const silentHighlight = () => {
     if (highlight) viewerRef.current?.setHighlight(highlight, { silent: true });
+  };
+
+  const clearHighlight = () => {
+    viewerRef.current?.clearHighlight();
+    setSelectionInfo(null);
+  };
+
+  const silentClearHighlight = () => {
+    viewerRef.current?.clearHighlight({ silent: true });
+    setSelectionInfo(null);
   };
 
   const getInfo = () => {
@@ -402,11 +415,17 @@ export default function DemoApp() {
                       <button className="demo-btn demo-btn-sm demo-btn-ghost" onClick={silentHighlight} title="Does not trigger onSelectionChange">
                         Apply (silent)
                       </button>
+                      <button className="demo-btn demo-btn-sm demo-btn-ghost" onClick={clearHighlight}>
+                        Clear
+                      </button>
+                      <button className="demo-btn demo-btn-sm demo-btn-ghost" onClick={silentClearHighlight} title="Does not trigger onSelectionChange">
+                        Clear (silent)
+                      </button>
                       <button className="demo-btn demo-btn-sm demo-btn-ghost" onClick={getInfo}>
                         Get Info
                       </button>
                     </div>
-                    <p className="demo-hint">Syntax: A1, A1:D10, B:B, 3:3, A1:B5,D1:E5</p>
+                    <p className="demo-hint">Syntax: A1, A1:D10, B:B, 3:3, A1:B5,D1:E5. Single-cell clicks only focus the cell; they do not create a visible highlight.</p>
                   </section>
                 </div>
               )}
@@ -569,7 +588,7 @@ export default function DemoApp() {
                         )}
                       </div>
                     ) : (
-                      <p className="demo-hint">Click a cell to see its info here</p>
+                      <p className="demo-hint">Drag-select a range or apply a highlight to see selection info here</p>
                     )}
                   </section>
 
@@ -582,6 +601,18 @@ export default function DemoApp() {
                         alert(`getHighlight() = ${h ?? 'null'}`);
                       }}>
                         getHighlight()
+                      </button>
+                      <button className="demo-btn demo-btn-sm demo-btn-full" onClick={() => {
+                        viewerRef.current?.clearHighlight();
+                        setSelectionInfo(null);
+                      }}>
+                        clearHighlight()
+                      </button>
+                      <button className="demo-btn demo-btn-sm demo-btn-full" onClick={() => {
+                        viewerRef.current?.clearHighlight({ silent: true });
+                        setSelectionInfo(null);
+                      }}>
+                        {`clearHighlight({ silent: true })`}
                       </button>
                       <button className="demo-btn demo-btn-sm demo-btn-full" onClick={() => {
                         const data = viewerRef.current?.getSelectedRangeData();

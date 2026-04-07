@@ -269,6 +269,8 @@ export interface SheetViewerHandle {
   setActiveSheet(sheetName: string): void;
   /** Programmatically highlight a range. Pass `silent: true` to suppress onSelectionChange callback. */
   setHighlight(range: string, options?: { silent?: boolean }): void;
+  /** Remove the current highlight/selection. Pass `silent: true` to suppress onSelectionChange callback. */
+  clearHighlight(options?: { silent?: boolean }): void;
   /** Get the current highlight/selection range as an Excel-style string (e.g. "A1:D10"), or null if none. */
   getHighlight(): string | null;
   /** Get cell values for a range expression (e.g. "A1:D10") from the active or named sheet */

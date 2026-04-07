@@ -57,13 +57,19 @@ const Cell = memo(function Cell({
   const isActive =
     activeCell != null && activeCell.row === rowIndex && activeCell.col === columnIndex;
 
-  // Only range selection is rendered visually — no single-cell outline.
+  // A single-cell range (1x1) is visually treated as just a focused cell — outline only, no tint.
+  const isSingleCellRange = ranges.length === 1
+    && ranges[0].startRow === ranges[0].endRow
+    && ranges[0].startCol === ranges[0].endCol;
+
   // Search match always takes priority over range highlight visually.
   const isAnySearchHit = isSearchMatch || isSearchActive;
-  const showInRangeTint = isInRange && !isActive && !isAnySearchHit;
-  const showActiveInRange = isActive && isInRange && !isAnySearchHit;
+  const showInRangeTint = isInRange && !isActive && !isSingleCellRange && !isAnySearchHit;
+  const showActiveInRange = isActive && isInRange && !isSingleCellRange && !isAnySearchHit;
+  const showActiveOutline = isActive && !isAnySearchHit && (!isInRange || isSingleCellRange);
 
   let className = 'sv-cell';
+  if (showActiveOutline) className += ' sv-cell-active';
   if (showInRangeTint) className += ' sv-cell-in-range';
   if (showActiveInRange) className += ' sv-cell-active-in-range';
   if (isMerged) className += ' sv-cell-merged';
