@@ -16,6 +16,8 @@ A high-performance React component for viewing and editing Excel and CSV files w
 - **View & edit modes** — read-only viewing or inline cell editing, controlled via props
 - **Multiple sheets** — tab-based sheet switching with per-sheet selection state
 - **Range highlighting** — pass Excel-style references like `A1:D10` to highlight and scroll into view
+- **Clear highlight API** — remove the active range via `ref.current?.clearHighlight()` or `setHighlight('')`
+- **Single-cell focus without range tint** — clicking one cell focuses it and updates the formula bar, but does not create a visible 1x1 highlight
 - **Custom highlight colors** — override the selection fill and border color via props
 - **Separate search highlight** — Ctrl+F search uses its own independent highlight with customizable colors
 - **Grid lines** — data-driven visible borders on arbitrary ranges (like Excel's "All Borders")
@@ -168,6 +170,12 @@ function App() {
     // Highlight silently (does NOT trigger onSelectionChange)
     ref.current?.setHighlight('A1:F20', { silent: true });
 
+    // Clear the current highlight / selection
+    ref.current?.clearHighlight();
+
+    // Clear silently (does NOT trigger onSelectionChange)
+    ref.current?.clearHighlight({ silent: true });
+
     // Get the current highlight/selection range string
     const range = ref.current?.getHighlight(); // e.g. "A1:D10" or null
 
@@ -197,7 +205,8 @@ function App() {
 | `getCellRangeData(range, name?)` | `CellValue[][] \| null` | Get data for an Excel-style range |
 | `getSelectedRangeData()` | `CellValue[][] \| null` | Get data for the current drag selection |
 | `setActiveSheet(name)` | `void` | Switch to a sheet |
-| `setHighlight(range, options?)` | `void` | Highlight a range. `{ silent: true }` suppresses `onSelectionChange` |
+| `setHighlight(range, options?)` | `void` | Highlight a range. Pass `''` to clear. `{ silent: true }` suppresses `onSelectionChange` |
+| `clearHighlight(options?)` | `void` | Remove the current highlight. `{ silent: true }` suppresses `onSelectionChange` |
 | `getHighlight()` | `string \| null` | Current highlight/selection range string (e.g. `"A1:D10"`) |
 | `setColumnWidth(col, width, name?)` | `void` | Set column width in pixels (min 30px) |
 | `setRowHeight(row, height, name?)` | `void` | Set row height in pixels (min 20px) |
@@ -221,6 +230,16 @@ Override the default blue selection with any fill and border color:
   highlightColor="rgba(255, 0, 0, 0.12)"
   highlightBorderColor="#e53935"
 />
+```
+
+To remove a highlight programmatically:
+
+```tsx
+ref.current?.clearHighlight();
+ref.current?.clearHighlight({ silent: true });
+
+// Equivalent clear via the existing API:
+ref.current?.setHighlight('');
 ```
 
 ---
@@ -352,7 +371,7 @@ Press Ctrl+F (Cmd+F) to open search. Matches are shown with a dedicated highligh
 
 ## Selection Callback with Cell DOM Info
 
-`onSelectionChange` now provides the DOM element and bounding rect of the anchor cell, useful for positioning custom popovers or tooltips:
+`onSelectionChange` provides the DOM element and bounding rect of the anchor cell for drag selections and programmatic highlights, useful for positioning custom popovers or tooltips:
 
 ```tsx
 <SheetViewer
@@ -381,6 +400,11 @@ The `highlight` prop, `setHighlight` method, and `getHighlight` method all use E
 | `B:B` | Entire column |
 | `3:3` | Entire row |
 | `A1:B5, D1:E5` | Multiple ranges (comma-separated) |
+
+Notes:
+
+- A plain single-cell click focuses the cell but does not create a visible highlighted range
+- `setHighlight('')`, `clearHighlight()`, or clearing the controlled `highlight` prop removes the current highlight
 
 ---
 
@@ -414,7 +438,7 @@ Paste requires `mode="edit"`.
 
 ## Large Cell Content
 
-When a cell contains long text, inactive cells truncate with ellipsis. Clicking a cell expands it to show the full content — identical to Google Sheets behavior. The formula bar always shows the complete value.
+When a cell contains long text, inactive cells truncate with ellipsis. The formula bar always shows the complete value, and highlighted range anchor cells can expand to show full content.
 
 ---
 

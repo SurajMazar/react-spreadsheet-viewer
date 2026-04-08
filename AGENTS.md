@@ -239,6 +239,7 @@ interface SheetViewerHandle {
   getSelectedRangeData(): CellValue[][] | null;
   setActiveSheet(sheetName: string): void;
   setHighlight(range: string, options?: { silent?: boolean }): void;
+  clearHighlight(options?: { silent?: boolean }): void;
   getHighlight(): string | null;
   setColumnWidth(colIndex: number, width: number, sheetName?: string): void;
   setRowHeight(rowIndex: number, height: number, sheetName?: string): void;
@@ -356,9 +357,9 @@ Test files follow the `__tests__/` directory convention next to the code they te
 
 ### Visual Tests (Storybook + Chromatic)
 
-20 stories in `stories/SheetViewer.stories.tsx`:
+21 stories in `stories/SheetViewer.stories.tsx`:
 Original 10: `FromFile`, `ViewMode`, `EditMode`, `WithHighlight`, `WithDownload`, `CustomSize`, `MultipleInstances`, `ControlledSheet`, `WithRef`, `NoSource`
-New 10: `CustomHighlightColors`, `SeparateSearchHighlight`, `SearchHighlightCustomColors`, `GridLinesStory`, `ShowToolbarProp`, `ThemePresets`, `SelectionChangeWithCellInfo`, `HighlightableOff`, `LargeDataset`, `AllFeaturesEnabled`
+New 11: `CustomHighlightColors`, `SeparateSearchHighlight`, `SearchHighlightCustomColors`, `GridLinesStory`, `ShowToolbarProp`, `ThemePresets`, `SelectionChangeWithCellInfo`, `HighlightableOff`, `LargeDataset`, `AllFeaturesEnabled`, `ClearHighlight`
 
 Stories use `createMockCsvFile()` to generate test data inline (no external fixture files needed).
 
@@ -584,8 +585,11 @@ The `chartable` prop (default: `true`) controls visibility of the Charts button 
 ### Silent setHighlight
 `ref.current.setHighlight('A1:D10', { silent: true })` highlights a range without triggering `onSelectionChange`. Useful for programmatic highlights that should not loop back into callback logic. Uses a ref-based suppression flag in SheetViewerInner.
 
+### clearHighlight Imperative Method
+`ref.current.clearHighlight()` removes the current highlighted range and clears the active anchor cell. `ref.current.clearHighlight({ silent: true })` performs the same update without triggering `onSelectionChange`. `setHighlight('')` now delegates to the same clearing logic.
+
 ### No Single-Cell Selection Visual
-The `sv-cell-active` class (blue outline for single clicked cells) has been removed. Only range selections (drag or programmatic) are rendered visually. This eliminates the visual discrepancy between single-cell and range selection states. The Cell component no longer computes or applies `showActiveOutline`.
+Single-cell clicks and keyboard navigation now clear any existing range highlight instead of creating a visible 1x1 selection. The grid still updates `activeCell` and the formula bar reference, but only drag selections or programmatic highlights render a visible range.
 
 ### Scrollable Sheet Tabs
 The sheet tab bar now has a visible thin scrollbar for workbooks with many sheets.
@@ -646,8 +650,8 @@ The `onSelectionChange` signature is now `(ranges: CellRange[], cellInfo?: { ele
 
 ### Interactive Demo App Overhaul
 `DemoApp.tsx` now features a collapsible side panel with four tabs:
-- **Display** — mode toggle, toolbar/download/charts/search/highlightable checkboxes, highlight range input with apply/silent/getInfo actions
+- **Display** — mode toggle, toolbar/download/charts/search/highlightable checkboxes, highlight range input with apply/silent/clear/getInfo actions
 - **Colors** — theme preset selector (5 presets: Default, Dark, Forest Green, Purple, Warm Amber), selection highlight fill/border color pickers, search match/active color pickers
 - **Grid Lines** — preset selector (None, Header Row, Data Table, Dashed Zone, Multi-zone) + custom range and color
-- **Events** — live `onSelectionChange` info (range string, anchor cell rect), and imperative ref action buttons
+- **Events** — live `onSelectionChange` info (range string, anchor cell rect), and imperative ref action buttons including `clearHighlight()`
 `demo.css` fully rewritten to support the panel layout.

@@ -173,6 +173,8 @@ export const WithRef = {
             <button style={btnStyle} onClick={() => setInfo(`Sheets: ${ref.current?.getSheetNames()?.join(', ')}`)}>getSheetNames()</button>
             <button style={btnStyle} onClick={() => { const d = ref.current?.getSheetData(); setInfo(`Rows: ${d?.rows}, Cols: ${d?.cols}`); }}>getSheetData()</button>
             <button style={btnStyle} onClick={() => { ref.current?.setHighlight('A1:C3'); setInfo('setHighlight("A1:C3")'); }}>Highlight A1:C3</button>
+            <button style={btnStyle} onClick={() => { ref.current?.clearHighlight(); setInfo('clearHighlight()'); }}>Clear highlight</button>
+            <button style={btnStyle} onClick={() => { ref.current?.clearHighlight({ silent: true }); setInfo('clearHighlight({ silent: true })'); }}>Clear silent</button>
             <button style={btnStyle} onClick={() => setInfo(`getHighlight() = ${ref.current?.getHighlight() ?? 'null'}`)}>getHighlight()</button>
             <button style={btnStyle} onClick={() => { ref.current?.undo(); setInfo('undo()'); }}>undo()</button>
             <button style={btnStyle} onClick={() => { ref.current?.redo(); setInfo('redo()'); }}>redo()</button>
@@ -566,6 +568,41 @@ export const AllFeaturesEnabled = {
             onCellChange={(s, r, c, v) => console.log(`Edit: ${s}[${r},${c}]=${v}`)}
             onSheetSelect={(n) => console.log('Tab clicked:', n)}
           />
+        </div>
+      </div>
+    );
+  },
+};
+
+export const ClearHighlight = {
+  name: '21 · Clear Highlight API',
+  parameters: { chromatic: { disableSnapshot: true } },
+  render: () => {
+    const ref = useRef<SheetViewerHandle>(null);
+    const file = createMockCsvFile(sampleCsv, 'clear-highlight.csv');
+    const [message, setMessage] = useState('Apply or clear a highlight via the ref API');
+
+    return (
+      <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
+        {infoPanel(
+          <>
+            <button style={btnStyle} onClick={() => { ref.current?.setHighlight('B2:D5'); setMessage('setHighlight("B2:D5")'); }}>
+              setHighlight("B2:D5")
+            </button>
+            <button style={btnStyle} onClick={() => { ref.current?.clearHighlight(); setMessage('clearHighlight()'); }}>
+              clearHighlight()
+            </button>
+            <button style={btnStyle} onClick={() => { ref.current?.setHighlight('B2:D5', { silent: true }); setMessage('setHighlight("B2:D5", { silent: true })'); }}>
+              setHighlight silent
+            </button>
+            <button style={btnStyle} onClick={() => { ref.current?.clearHighlight({ silent: true }); setMessage('clearHighlight({ silent: true })'); }}>
+              clearHighlight silent
+            </button>
+            <span style={{ color: '#5f6368' }}>{message}</span>
+          </>
+        )}
+        <div style={{ flex: 1 }}>
+          <SheetViewer ref={ref} source={file} />
         </div>
       </div>
     );

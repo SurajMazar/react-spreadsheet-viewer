@@ -75,12 +75,29 @@ function SheetViewerInner({
   const internalActiveSheet = useViewerStore((s) => s.activeSheet);
   const setActiveSheet = useViewerStore((s) => s.setActiveSheet);
   const setSelectionRanges = useViewerStore((s) => s.setSelectionRanges);
-  const setRangeInput = useViewerStore((s) => s.setRangeInput);
   const sheetData = useViewerStore((s) => (s.activeSheet ? s.sheets[s.activeSheet] : null));
   const setMode = useViewerStore((s) => s.setMode);
 
   // Flag to suppress onSelectionChange for silent setHighlight calls
   const suppressSelectionCb = useReactRef(false);
+
+  const withOptionalSilentSelection = (
+    options: { silent?: boolean } | undefined,
+    callback: () => void
+  ) => {
+    if (options?.silent) suppressSelectionCb.current = true;
+    callback();
+    if (options?.silent) suppressSelectionCb.current = false;
+  };
+
+  const clearHighlightInStore = (options?: { silent?: boolean }) => {
+    const state = storeApi.getState();
+    if (!state.activeSheet) return;
+    withOptionalSilentSelection(options, () => {
+      state.setSelectionRanges(state.activeSheet!, [], '');
+      state.setActiveCell(null, null);
+    });
+  };
 
   // Parse gridLines prop into resolved CellRange configs
   const parsedGridLines = useMemo<ParsedGridLineConfig[]>(() => {
@@ -142,15 +159,22 @@ function SheetViewerInner({
     setHighlight: (range: string, options?: { silent?: boolean }) => {
       const s = storeApi.getState();
       if (!s.activeSheet) return;
-      const sheet = s.sheets[s.activeSheet];
+      const activeSheet = s.activeSheet;
+      const sheet = s.sheets[activeSheet];
       if (!sheet) return;
       const ranges = parseRangeExpression(range, sheet.rows, sheet.cols);
-      if (ranges.length > 0) {
-        if (options?.silent) suppressSelectionCb.current = true;
-        s.setSelectionRanges(s.activeSheet, ranges, range);
-        s.setRangeInput(s.activeSheet, range);
-        if (options?.silent) suppressSelectionCb.current = false;
+      if (ranges.length === 0) {
+        clearHighlightInStore(options);
+        return;
       }
+      withOptionalSilentSelection(options, () => {
+        s.setProgrammaticHighlight(true);
+        s.setSelectionRanges(activeSheet, ranges, range);
+        s.setActiveCell(ranges[0].startRow, ranges[0].startCol);
+      });
+    },
+    clearHighlight: (options?: { silent?: boolean }) => {
+      clearHighlightInStore(options);
     },
     getHighlight: () => {
       const s = storeApi.getState();
@@ -257,16 +281,28 @@ function SheetViewerInner({
     }
   }, [controlledSheet, internalActiveSheet, setActiveSheet]);
 
-  // Sync highlight prop
+  // Track previous highlight prop to detect prop-driven transitions only
+  const prevHighlightRef = useReactRef<string | undefined>(highlight);
+
+  // Sync highlight prop — only reacts to prop changes, never clears imperative highlights
   useEffect(() => {
-    if (highlight && internalActiveSheet && sheetData) {
-      const ranges = parseRangeExpression(highlight, sheetData.rows, sheetData.cols);
-      if (ranges.length > 0) {
-        setSelectionRanges(internalActiveSheet, ranges, highlight);
-        setRangeInput(internalActiveSheet, highlight);
+    if (!internalActiveSheet || !sheetData) return;
+    const prev = prevHighlightRef.current;
+    prevHighlightRef.current = highlight;
+
+    if (!highlight) {
+      // Only clear if highlight prop transitioned from a value to empty/undefined
+      if (prev) {
+        clearHighlightInStore();
       }
+      return;
     }
-  }, [highlight, internalActiveSheet, sheetData, setSelectionRanges, setRangeInput]);
+    const ranges = parseRangeExpression(highlight, sheetData.rows, sheetData.cols);
+    if (ranges.length > 0) {
+      storeApi.getState().setProgrammaticHighlight(true);
+      setSelectionRanges(internalActiveSheet, ranges, highlight);
+    }
+  }, [highlight, internalActiveSheet, sheetData, setSelectionRanges, storeApi]);
 
   // Listen for cell changes in edit mode and forward to callback
   useEffect(() => {

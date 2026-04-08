@@ -269,6 +269,8 @@ export interface SheetViewerHandle {
   setActiveSheet(sheetName: string): void;
   /** Programmatically highlight a range. Pass `silent: true` to suppress onSelectionChange callback. */
   setHighlight(range: string, options?: { silent?: boolean }): void;
+  /** Remove the current highlight/selection. Pass `silent: true` to suppress onSelectionChange callback. */
+  clearHighlight(options?: { silent?: boolean }): void;
   /** Get the current highlight/selection range as an Excel-style string (e.g. "A1:D10"), or null if none. */
   getHighlight(): string | null;
   /** Get cell values for a range expression (e.g. "A1:D10") from the active or named sheet */
@@ -351,6 +353,8 @@ export interface ViewerState {
   // UI state
   showChartPanel: boolean;
   chartType: string;
+  /** True when the current highlight was set via the imperative setHighlight API (not a user click) */
+  isProgrammaticHighlight: boolean;
   /** The range that was last Ctrl+C copied (for marching ants indicator) */
   copiedRange: CellRange | null;
   /** All search match cell positions (row/col, 0-based) */
@@ -385,6 +389,7 @@ export interface ViewerState {
   toggleChartPanel: () => void;
   setChartType: (chartType: string) => void;
   setCopiedRange: (range: CellRange | null) => void;
+  setProgrammaticHighlight: (value: boolean) => void;
   setSearchMatches: (matches: { row: number; col: number }[]) => void;
   setSearchActiveIndex: (index: number) => void;
   setCellStyle: (sheetName: string, row: number, col: number, style: CellStyle | null) => void;

@@ -25,6 +25,7 @@ function createViewerStore(): StoreApi<ViewerState> {
     activeCell: null,
     showChartPanel: false,
     chartType: 'bar',
+    isProgrammaticHighlight: false,
     copiedRange: null,
     searchMatches: [],
     searchActiveIndex: 0,
@@ -99,6 +100,7 @@ function createViewerStore(): StoreApi<ViewerState> {
     toggleChartPanel: () => set((s) => ({ showChartPanel: !s.showChartPanel })),
     setChartType: (chartType: string) => set({ chartType }),
     setCopiedRange: (range: CellRange | null) => set({ copiedRange: range }),
+    setProgrammaticHighlight: (value: boolean) => set({ isProgrammaticHighlight: value }),
     setSearchMatches: (matches: { row: number; col: number }[]) =>
       set({ searchMatches: matches, searchActiveIndex: 0 }),
     setSearchActiveIndex: (index: number) => set({ searchActiveIndex: index }),
@@ -212,7 +214,7 @@ function createViewerStore(): StoreApi<ViewerState> {
       set({
         fileName: null, sheetNames: [], sheets: {}, images: {}, chartOverlays: {},
         activeSheet: null, isParsing: false, parseProgress: 0, parseStatus: '', parseError: null,
-        selections: {}, activeCell: null, showChartPanel: false, copiedRange: null,
+        selections: {}, activeCell: null, showChartPanel: false, isProgrammaticHighlight: false, copiedRange: null,
         undoStack: [], redoStack: [],
       }),
   }));
