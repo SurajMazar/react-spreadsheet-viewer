@@ -113,11 +113,15 @@ const Cell = memo(function Cell({
 
   // Selection range border override
   const borderColor = highlightBorderColor || 'var(--sv-color-primary)';
+  const hasBorder = borders && !suppressSingleCellTint && (borders.top || borders.bottom || borders.left || borders.right);
   if (borders && !suppressSingleCellTint) {
     if (borders.top) mergedStyle.borderTop = `2px solid ${borderColor}`;
     if (borders.bottom) mergedStyle.borderBottom = `2px solid ${borderColor}`;
     if (borders.left) mergedStyle.borderLeft = `2px solid ${borderColor}`;
     if (borders.right) mergedStyle.borderRight = `2px solid ${borderColor}`;
+  }
+  if (hasBorder) {
+    mergedStyle.zIndex = 3;
   }
 
   // Grid line borders: applied on top of selection borders (per-side max)
