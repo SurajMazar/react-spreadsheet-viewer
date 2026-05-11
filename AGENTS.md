@@ -598,7 +598,7 @@ The sheet tab bar now has a visible thin scrollbar for workbooks with many sheet
 Google Sheets-style mutually exclusive selection: active cell outline OR range tint, never both. Marching ants copy indicator.
 
 ### Scroll-to-Center for Highlights
-When `highlight` prop is set or `setHighlight` is called, the grid scrolls the range to the center of the viewport.
+When `highlight` prop is set or `setHighlight` is called, the grid scrolls the range to the center of the viewport only if the target cells are not already visible. If the highlighted range is within the current viewport, no scroll occurs.
 
 ### Nested Container Horizontal Scroll
 Trackpad/mouse horizontal scrolling works correctly even when the SheetViewer is embedded in nested scrollable containers.
