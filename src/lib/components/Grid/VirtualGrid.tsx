@@ -163,25 +163,40 @@ export default function VirtualGrid({
     rowVirtualizer.measure();
   }, [rowHeights, rowVirtualizer]);
 
-  // Auto-scroll to selection only when it is outside the visible viewport
+  // Auto-scroll to selection only when the full range is not visible in the viewport
   useEffect(() => {
     if (ranges.length > 0) {
       const first = ranges[0];
+      const el = scrollRef.current;
+      if (!el) return;
+
       const visibleRows = rowVirtualizerRef.current.getVirtualItems();
       const visibleCols = colVirtualizerRef.current.getVirtualItems();
       if (visibleRows.length === 0 || visibleCols.length === 0) return;
 
-      const firstVisibleRow = visibleRows[0].index;
-      const lastVisibleRow = visibleRows[visibleRows.length - 1].index;
-      const firstVisibleCol = visibleCols[0].index;
-      const lastVisibleCol = visibleCols[visibleCols.length - 1].index;
+      // Use pixel bounds to check true visibility (getVirtualItems includes overscan)
+      const scrollTop = el.scrollTop;
+      const scrollLeft = el.scrollLeft;
+      const viewportBottom = scrollTop + el.clientHeight;
+      const viewportRight = scrollLeft + el.clientWidth;
 
-      const rowVisible = first.startRow >= firstVisibleRow && first.startRow <= lastVisibleRow;
-      const colVisible = first.startCol >= firstVisibleCol && first.startCol <= lastVisibleCol;
+      const rangeRowStart = visibleRows.find(r => r.index === first.startRow);
+      const rangeRowEnd = visibleRows.find(r => r.index === first.endRow);
+      const rangeColStart = visibleCols.find(c => c.index === first.startCol);
+      const rangeColEnd = visibleCols.find(c => c.index === first.endCol);
 
-      if (!rowVisible || !colVisible) {
-        rowVirtualizerRef.current.scrollToIndex(first.startRow, { align: 'center' });
-        colVirtualizerRef.current.scrollToIndex(first.startCol, { align: 'center' });
+      const rowFullyVisible = rangeRowStart && rangeRowEnd
+        && rangeRowStart.start >= scrollTop && rangeRowEnd.end <= viewportBottom;
+      const colFullyVisible = rangeColStart && rangeColEnd
+        && rangeColStart.start >= scrollLeft && rangeColEnd.end <= viewportRight;
+
+      if (!rowFullyVisible || !colFullyVisible) {
+        if (!rowFullyVisible) {
+          rowVirtualizerRef.current.scrollToIndex(first.startRow, { align: 'center' });
+        }
+        if (!colFullyVisible) {
+          colVirtualizerRef.current.scrollToIndex(first.startCol, { align: 'center' });
+        }
       }
     }
   }, [ranges]);
