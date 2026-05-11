@@ -559,7 +559,9 @@
 }
 
 .sv-cell-active-in-range {
-  background: var(--sv-highlight-color, var(--sv-color-selection)) !important;
+  background:
+    linear-gradient(var(--sv-highlight-color, var(--sv-color-selection)), var(--sv-highlight-color, var(--sv-color-selection))),
+    var(--sv-color-bg) !important;
   z-index: 5;
   overflow: visible;
 }
@@ -570,21 +572,23 @@
   white-space: nowrap;
 }
 
-/* Active cell (no range): expand text; transparent span avoids double-stacked fill (e.g. rgba highlight) */
+/* Active cell (no range): expand text with opaque bg so overflow covers adjacent cells */
 .sv-cell-active .sv-cell-text {
   flex-shrink: 0;
   overflow: visible;
   text-overflow: clip;
-  background: transparent;
+  background: var(--sv-color-bg);
   padding-right: 6px;
 }
 
-/* Active cell inside a range: expand text but keep transparent bg to match range tint */
+/* Active cell inside a range: expand text with opaque bg (highlight tint over solid base) */
 .sv-cell-active-in-range .sv-cell-text {
   flex-shrink: 0;
   overflow: visible;
   text-overflow: clip;
-  background: transparent;
+  background:
+    linear-gradient(var(--sv-highlight-color, var(--sv-color-selection)), var(--sv-highlight-color, var(--sv-color-selection))),
+    var(--sv-color-bg);
   padding-right: 6px;
 }
 

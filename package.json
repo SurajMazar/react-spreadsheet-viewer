@@ -1,6 +1,6 @@
 {
   "name": "rc-sheet-viewer-17",
-  "version": "2.1.45",
+  "version": "2.1.48",
   "type": "module",
   "main": "./dist/sheet-viewer.js",
   "module": "./dist/sheet-viewer.js",
