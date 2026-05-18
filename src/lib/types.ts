@@ -245,6 +245,8 @@ export interface SheetViewerProps {
   chartable?: boolean;
   /** Enable Ctrl+F search (default: true) */
   searchable?: boolean;
+  /** Enable Tab key to navigate between cells (default: true) */
+  tabNavigation?: boolean;
   /** Container height (CSS value or number of pixels) */
   height?: number | string;
   /** Container width (CSS value or number of pixels) */

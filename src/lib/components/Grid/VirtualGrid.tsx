@@ -24,6 +24,7 @@ interface VirtualGridProps {
   highlightColor?: string;
   highlightBorderColor?: string;
   parsedGridLines?: ParsedGridLineConfig[];
+  tabNavigation?: boolean;
 }
 
 export default function VirtualGrid({
@@ -31,6 +32,7 @@ export default function VirtualGrid({
   highlightColor,
   highlightBorderColor,
   parsedGridLines,
+  tabNavigation = true,
 }: VirtualGridProps) {
   const activeSheet = useViewerStore((s) => s.activeSheet);
   const sheetData = useViewerStore((s) => (s.activeSheet ? s.sheets[s.activeSheet] : null));
@@ -311,6 +313,7 @@ export default function VirtualGrid({
           newCol = Math.min(effectiveCols - 1, newCol + 1);
           break;
         case 'Tab':
+          if (!tabNavigation) return;
           e.preventDefault();
           newCol = e.shiftKey
             ? Math.max(0, newCol - 1)
@@ -676,6 +679,7 @@ export default function VirtualGrid({
                     col={col}
                     value={value}
                     validation={cellValidation}
+                    tabNavigation={tabNavigation}
                     style={{
                       position: 'absolute',
                       top: vr.start,

@@ -58,6 +58,7 @@ function SheetViewerInner({
   downloadable = false,
   chartable = true,
   searchable = true,
+  tabNavigation = true,
   height = '100%',
   width = '100%',
   className = '',
@@ -403,6 +404,7 @@ function SheetViewerInner({
                 highlightColor={highlightColor}
                 highlightBorderColor={highlightBorderColor}
                 parsedGridLines={parsedGridLines.length > 0 ? parsedGridLines : undefined}
+                tabNavigation={tabNavigation}
               />
               {searchable && <SearchBar />}
             </div>

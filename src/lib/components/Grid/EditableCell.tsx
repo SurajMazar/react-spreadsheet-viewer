@@ -8,6 +8,7 @@ export interface EditableCellProps {
   value: CellValue;
   style: CSSProperties;
   validation?: ValidationRule;
+  tabNavigation?: boolean;
   onCommit: (row: number, col: number, value: string) => void;
   onCancel: () => void;
 }
@@ -16,7 +17,7 @@ export interface EditableCellProps {
  * An input overlay that appears when a cell is double-clicked in edit mode.
  * Supports data validation (list type renders <select>, others show error states).
  */
-export default function EditableCell({ row, col, value, style, validation, onCommit, onCancel }: EditableCellProps) {
+export default function EditableCell({ row, col, value, style, validation, tabNavigation = true, onCommit, onCancel }: EditableCellProps) {
   const [localValue, setLocalValue] = useState(String(value ?? ''));
   const [validationError, setValidationError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -55,6 +56,7 @@ export default function EditableCell({ row, col, value, style, validation, onCom
         e.preventDefault();
         onCancel();
       } else if (e.key === 'Tab') {
+        if (!tabNavigation) return;
         e.preventDefault();
         tryCommit(localValue);
       }
