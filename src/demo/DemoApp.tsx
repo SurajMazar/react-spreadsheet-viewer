@@ -1,4 +1,6 @@
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
+import Dropdown from 'rc-dropdown';
+import 'rc-dropdown/assets/index.css';
 import { SheetViewer } from '../lib';
 import type {
   SheetViewerMode,
@@ -163,6 +165,38 @@ export default function DemoApp() {
   // Ref
   const viewerRef = useRef<SheetViewerHandle>(null);
 
+  // Highlight area anchor — one element spanning the whole highlighted range
+  const highlightAreaRef = useRef<HTMLDivElement>(null);
+  const [highlightRect, setHighlightRect] = useState<DOMRect | null>(null);
+
+  // Read the rect in an effect, never inside onSelectionChange: that callback
+  // fires before React commits, so the element is not positioned yet.
+  //
+  // The element itself tracks the grid (it lives in content coordinates), but a
+  // cached DOMRect does not — so re-read it on scroll and whenever the element
+  // changes size, otherwise the chip drifts away on scroll or column resize.
+  useEffect(() => {
+    const read = () =>
+      setHighlightRect(highlightAreaRef.current?.getBoundingClientRect() ?? null);
+    read();
+
+    const el = highlightAreaRef.current;
+    if (!el) return;
+
+    const scroller = document.querySelector('.sv-grid-scroll');
+    scroller?.addEventListener('scroll', read, { passive: true });
+    window.addEventListener('resize', read);
+    // Catches column/row resize, which moves the box without any scroll event
+    const ro = new ResizeObserver(read);
+    ro.observe(el);
+
+    return () => {
+      scroller?.removeEventListener('scroll', read);
+      window.removeEventListener('resize', read);
+      ro.disconnect();
+    };
+  }, [selectionInfo, source]);
+
   // ─── Computed props ───────────────────────────────────────────────────────────
 
   const currentTheme = THEME_PRESETS[themePreset]?.theme ?? {};
@@ -252,11 +286,75 @@ export default function DemoApp() {
     setSelectionInfo(null);
   };
 
+  const copyHighlightValues = async () => {
+    const rows = viewerRef.current?.getSelectedRangeData();
+    if (!rows || rows.length === 0) {
+      alert('Nothing highlighted.');
+      return;
+    }
+    const tsv = rows.map((r) => r.map((c) => (c == null ? '' : String(c))).join('\t')).join('\n');
+    try {
+      await navigator.clipboard.writeText(tsv);
+      alert(`Copied ${rows.length} × ${rows[0].length} cells to the clipboard.`);
+    } catch {
+      alert(`Clipboard blocked. Values:\n\n${tsv}`);
+    }
+  };
+
   const getInfo = () => {
     const hl = viewerRef.current?.getHighlight();
     const sheets = viewerRef.current?.getSheetNames();
     alert(`Current highlight: ${hl ?? 'none'}\nSheets: ${sheets?.join(', ')}`);
   };
+
+  const getHighlightEl = () => {
+    const el = viewerRef.current?.getHighlightElement();
+    if (!el) {
+      alert('No highlight element — nothing is highlighted.');
+      return;
+    }
+    const r = el.getBoundingClientRect();
+    console.log('Highlight area element:', el);
+    alert(
+      `Highlight area element (one element for the whole range):\n` +
+        `class: ${el.className}\n` +
+        `viewport rect: ${Math.round(r.left)}, ${Math.round(r.top)}\n` +
+        `size: ${Math.round(r.width)} × ${Math.round(r.height)}px\n` +
+        `matches highlightAreaRef: ${el === highlightAreaRef.current}`
+    );
+  };
+
+  // Overlay for the floating dropdown. A plain element rather than rc-menu, so
+  // the demo does not pull in another dependency just to render four rows.
+  // Declared after the handlers it references — it is evaluated during render.
+  const highlightMenu = (
+    <div className="demo-dropdown-menu">
+      <div className="demo-dropdown-title">
+        {unionLabel(selectionInfo?.ranges)}
+        {highlightRect && (
+          <span className="demo-dropdown-dim">
+            {Math.round(highlightRect.width)} × {Math.round(highlightRect.height)} px
+          </span>
+        )}
+      </div>
+      <button type="button" className="demo-dropdown-item" onClick={copyHighlightValues}>
+        Copy values
+      </button>
+      <button type="button" className="demo-dropdown-item" onClick={getHighlightEl}>
+        Inspect element
+      </button>
+      <button type="button" className="demo-dropdown-item" onClick={getInfo}>
+        Highlight info
+      </button>
+      <button
+        type="button"
+        className="demo-dropdown-item demo-dropdown-danger"
+        onClick={clearHighlight}
+      >
+        Clear highlight
+      </button>
+    </div>
+  );
 
   // ─── Upload screen ───────────────────────────────────────────────────────────
 
@@ -326,12 +424,35 @@ export default function DemoApp() {
             onSheetChange={handleSheetChange}
             onCellChange={handleCellChange}
             onSelectionChange={handleSelectionChange}
+            highlightAreaRef={highlightAreaRef}
             downloadable={downloadable}
             searchable={searchable}
             chartable={chartable}
             height="100%"
             width="100%"
           />
+
+          {/* Floating rc-dropdown anchored to the highlight area element. The
+              trigger is positioned purely from highlightAreaRef.current's
+              bounding rect, so it tracks the highlight on scroll and resize. */}
+          {highlightRect && highlightRect.width > 0 && (
+            <Dropdown
+              trigger={['click']}
+              animation="slide-up"
+              overlay={highlightMenu}
+              getPopupContainer={() => document.body}
+            >
+              <button
+                type="button"
+                className="demo-highlight-chip"
+                style={{ top: highlightRect.top - 26, left: highlightRect.left }}
+              >
+                {unionLabel(selectionInfo?.ranges)} · {Math.round(highlightRect.width)}×
+                {Math.round(highlightRect.height)}px
+                <span className="demo-chip-caret" aria-hidden="true">▾</span>
+              </button>
+            </Dropdown>
+          )}
         </div>
 
         {/* Side Panel */}
@@ -428,6 +549,13 @@ export default function DemoApp() {
                       </button>
                       <button className="demo-btn demo-btn-sm demo-btn-ghost" onClick={getInfo}>
                         Get Info
+                      </button>
+                      <button
+                        className="demo-btn demo-btn-sm demo-btn-ghost"
+                        onClick={getHighlightEl}
+                        title="ref.getHighlightElement() — one element spanning the whole highlight"
+                      >
+                        Get Element
                       </button>
                     </div>
                     <p className="demo-hint">Syntax: A1, A1:D10, B:B, 3:3, A1:B5,D1:E5. Single-cell clicks only focus the cell; they do not create a visible highlight.</p>
@@ -620,6 +748,12 @@ export default function DemoApp() {
                         {`clearHighlight({ silent: true })`}
                       </button>
                       <button className="demo-btn demo-btn-sm demo-btn-full" onClick={() => {
+                        const ok = viewerRef.current?.scrollToSelection();
+                        if (!ok) alert('scrollToSelection() → false (nothing selected)');
+                      }}>
+                        scrollToSelection()
+                      </button>
+                      <button className="demo-btn demo-btn-sm demo-btn-full" onClick={() => {
                         const data = viewerRef.current?.getSelectedRangeData();
                         alert(`Selected data:\n${JSON.stringify(data, null, 2)}`);
                       }}>
@@ -657,6 +791,23 @@ export default function DemoApp() {
       </div>
     </div>
   );
+}
+
+// Label for the highlight-area element: the union box, since that element covers
+// the bounding box of every range (not just ranges[0]).
+function unionLabel(ranges?: CellRange[]): string {
+  if (!ranges || ranges.length === 0) return '';
+  let sr = Infinity, sc = Infinity, er = -Infinity, ec = -Infinity;
+  for (const r of ranges) {
+    sr = Math.min(sr, r.startRow, r.endRow);
+    er = Math.max(er, r.startRow, r.endRow);
+    sc = Math.min(sc, r.startCol, r.endCol);
+    ec = Math.max(ec, r.startCol, r.endCol);
+  }
+  const box = sr === er && sc === ec
+    ? `${toCol(sc)}${sr + 1}`
+    : `${toCol(sc)}${sr + 1}:${toCol(ec)}${er + 1}`;
+  return ranges.length > 1 ? `${box} (union of ${ranges.length})` : box;
 }
 
 // Column index → Excel letter (A, B, ..., Z, AA, ...)

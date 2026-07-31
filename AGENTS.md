@@ -394,6 +394,11 @@ For features that SheetJS doesn't expose (pivot tables, embedded charts), the ra
 - `pivotReconstructor.ts` reads `xl/pivotTables/*.xml` and `xl/pivotCache/*.xml`
 - `chartExtractor.ts` reads `xl/charts/*.xml` and `xl/drawings/*.xml`
 
+### CellRange → Pixels
+`getRangeBox(range, rowMeasurements, colMeasurements)` in `src/lib/utils/gridGeometry.ts` is the **canonical** way to convert a `CellRange` into a pixel box. Pass the virtualizers' public `measurementsCache` arrays (`getVirtualItems()` populates them, so call it first). Never multiply by `COL_WIDTH`/`ROW_HEIGHT` — that ignores resized columns/rows. `unionRanges()` in `rangeParser.ts` collapses multiple ranges into one bounding box first.
+
+Known remaining offenders that still use the constants: merged-cell sizing (`VirtualGrid.tsx`) and chart anchor offsets (`ChartOverlays.tsx`).
+
 ### Column Labels
 `colIndexToLetter()` in `rangeParser.ts` generates Excel-style column labels: A, B, ..., Z, AA, AB, ..., up to any column count. The inverse is `colLetterToIndex()`.
 

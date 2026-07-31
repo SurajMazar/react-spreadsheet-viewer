@@ -516,3 +516,343 @@ describe('SheetViewer — Source types', () => {
     expect(ref.current?.getSheetData()).not.toBeNull();
   }, 15000);
 });
+
+// =============================================
+// highlightAreaRef — single element spanning the whole highlight
+// =============================================
+// A CSV source leaves colWidths/rowHeights empty, so the grid is uniform
+// 100x26 and pixel expectations below are stable. Note that in jsdom the
+// scroll container measures 0x0, so no Cell nodes render at all — but the
+// virtualizer's measurementsCache is still fully populated, which is exactly
+// why this overlay is assertable here while [data-cell] lookups are not.
+describe('SheetViewer — highlightAreaRef', () => {
+  const areaEls = () => document.querySelectorAll('.sv-highlight-area');
+
+  it('is null when there is no highlight', async () => {
+    const ref = createRef<SheetViewerHandle>();
+    const areaRef = createRef<HTMLDivElement>();
+    const file = createCsvFile(sampleCsv);
+
+    render(
+      <SheetViewer ref={ref} highlightAreaRef={areaRef} source={file} height={600} width={800} />
+    );
+    await multiSheetHelper(ref);
+
+    expect(areaRef.current).toBeNull();
+    expect(areaEls().length).toBe(0);
+  }, 15000);
+
+  it('receives one element covering the highlighted range', async () => {
+    const ref = createRef<SheetViewerHandle>();
+    const areaRef = createRef<HTMLDivElement>();
+    const file = createCsvFile(sampleCsv);
+
+    render(
+      <SheetViewer ref={ref} highlightAreaRef={areaRef} source={file} height={600} width={800} />
+    );
+    await multiSheetHelper(ref);
+
+    act(() => { ref.current?.setHighlight('A1:B2'); });
+
+    const el = areaRef.current!;
+    expect(el).toBeInstanceOf(HTMLElement);
+    expect(el.classList.contains('sv-highlight-area')).toBe(true);
+    expect(el.style.top).toBe('0px');
+    expect(el.style.left).toBe('0px');
+    expect(el.style.width).toBe('200px');
+    expect(el.style.height).toBe('52px');
+  }, 15000);
+
+  it('exposes exactly one element spanning multiple disjoint ranges', async () => {
+    const ref = createRef<SheetViewerHandle>();
+    const areaRef = createRef<HTMLDivElement>();
+    const file = createCsvFile(sampleCsv);
+
+    render(
+      <SheetViewer ref={ref} highlightAreaRef={areaRef} source={file} height={600} width={800} />
+    );
+    await multiSheetHelper(ref);
+
+    act(() => { ref.current?.setHighlight('A1:B2,D1:E3'); });
+
+    // One element only — the union box A1:E3
+    expect(areaEls().length).toBe(1);
+    const el = areaRef.current!;
+    expect(el.style.left).toBe('0px');
+    expect(el.style.width).toBe('500px');
+    expect(el.style.height).toBe('78px');
+  }, 15000);
+
+  it('goes back to null when the highlight is cleared', async () => {
+    const ref = createRef<SheetViewerHandle>();
+    const areaRef = createRef<HTMLDivElement>();
+    const file = createCsvFile(sampleCsv);
+
+    render(
+      <SheetViewer ref={ref} highlightAreaRef={areaRef} source={file} height={600} width={800} />
+    );
+    await multiSheetHelper(ref);
+
+    act(() => { ref.current?.setHighlight('A1:B2'); });
+    expect(areaRef.current).not.toBeNull();
+
+    act(() => { ref.current?.clearHighlight(); });
+    expect(areaRef.current).toBeNull();
+    expect(areaEls().length).toBe(0);
+  }, 15000);
+
+  it('works with the declarative highlight prop (which leaves activeCell null)', async () => {
+    // Regression guard: the overlay must derive from `ranges`, not `activeCell`.
+    const ref = createRef<SheetViewerHandle>();
+    const areaRef = createRef<HTMLDivElement>();
+    const file = createCsvFile(sampleCsv);
+
+    const { rerender } = render(
+      <SheetViewer
+        ref={ref}
+        highlightAreaRef={areaRef}
+        highlight="B2:C3"
+        source={file}
+        height={600}
+        width={800}
+      />
+    );
+    await multiSheetHelper(ref);
+
+    await waitFor(() => { expect(areaRef.current).not.toBeNull(); });
+    const el = areaRef.current!;
+    expect(el.style.top).toBe('26px');
+    expect(el.style.left).toBe('100px');
+    expect(el.style.width).toBe('200px');
+    expect(el.style.height).toBe('52px');
+
+    rerender(
+      <SheetViewer
+        ref={ref}
+        highlightAreaRef={areaRef}
+        highlight={undefined}
+        source={file}
+        height={600}
+        width={800}
+      />
+    );
+    await waitFor(() => { expect(areaRef.current).toBeNull(); });
+  }, 15000);
+
+  it('supports a callback ref, including detach on clear', async () => {
+    const ref = createRef<SheetViewerHandle>();
+    const file = createCsvFile(sampleCsv);
+    const seen: (HTMLDivElement | null)[] = [];
+
+    render(
+      <SheetViewer
+        ref={ref}
+        highlightAreaRef={(el) => { seen.push(el); }}
+        source={file}
+        height={600}
+        width={800}
+      />
+    );
+    await multiSheetHelper(ref);
+
+    act(() => { ref.current?.setHighlight('A1:B2'); });
+    expect(seen[seen.length - 1]).toBeInstanceOf(HTMLElement);
+
+    act(() => { ref.current?.clearHighlight(); });
+    expect(seen[seen.length - 1]).toBeNull();
+  }, 15000);
+
+  it('still provides the element when highlightable is false', async () => {
+    const ref = createRef<SheetViewerHandle>();
+    const areaRef = createRef<HTMLDivElement>();
+    const file = createCsvFile(sampleCsv);
+
+    render(
+      <SheetViewer
+        ref={ref}
+        highlightAreaRef={areaRef}
+        highlightable={false}
+        source={file}
+        height={600}
+        width={800}
+      />
+    );
+    await multiSheetHelper(ref);
+
+    act(() => { ref.current?.setHighlight('A1:B2'); });
+    expect(areaRef.current).not.toBeNull();
+    expect(areaRef.current?.style.width).toBe('200px');
+  }, 15000);
+
+  it('repositions when a column or row inside the highlight is resized', async () => {
+    const ref = createRef<SheetViewerHandle>();
+    const areaRef = createRef<HTMLDivElement>();
+    const file = createCsvFile(sampleCsv);
+
+    render(
+      <SheetViewer ref={ref} highlightAreaRef={areaRef} source={file} height={600} width={800} />
+    );
+    await multiSheetHelper(ref);
+
+    act(() => { ref.current?.setHighlight('A1:B2'); });
+    expect(areaRef.current?.style.width).toBe('200px');
+
+    act(() => { ref.current?.setColumnWidth(0, 300); });
+    await waitFor(() => { expect(areaRef.current?.style.width).toBe('400px'); });
+
+    act(() => { ref.current?.setRowHeight(0, 60); });
+    await waitFor(() => { expect(areaRef.current?.style.height).toBe('86px'); });
+  }, 15000);
+
+  it('getHighlightElement returns the same element as the ref', async () => {
+    const ref = createRef<SheetViewerHandle>();
+    const areaRef = createRef<HTMLDivElement>();
+    const file = createCsvFile(sampleCsv);
+
+    render(
+      <SheetViewer ref={ref} highlightAreaRef={areaRef} source={file} height={600} width={800} />
+    );
+    await multiSheetHelper(ref);
+
+    expect(ref.current?.getHighlightElement()).toBeNull();
+
+    act(() => { ref.current?.setHighlight('A1:B2'); });
+    expect(ref.current?.getHighlightElement()).toBe(areaRef.current);
+
+    act(() => { ref.current?.clearHighlight(); });
+    expect(ref.current?.getHighlightElement()).toBeNull();
+  }, 15000);
+
+  it('keeps two viewer instances isolated', async () => {
+    const refA = createRef<SheetViewerHandle>();
+    const refB = createRef<SheetViewerHandle>();
+    const areaA = createRef<HTMLDivElement>();
+    const areaB = createRef<HTMLDivElement>();
+
+    render(
+      <>
+        <SheetViewer
+          ref={refA}
+          highlightAreaRef={areaA}
+          source={createCsvFile(sampleCsv, 'a.csv')}
+          height={600}
+          width={800}
+        />
+        <SheetViewer
+          ref={refB}
+          highlightAreaRef={areaB}
+          source={createCsvFile(sampleCsv, 'b.csv')}
+          height={600}
+          width={800}
+        />
+      </>
+    );
+    await multiSheetHelper(refA);
+    await multiSheetHelper(refB);
+
+    act(() => {
+      refA.current?.setHighlight('A1:A1');
+      refB.current?.setHighlight('A1:C3');
+    });
+
+    expect(areaA.current).not.toBe(areaB.current);
+    expect(areaA.current?.style.width).toBe('100px');
+    expect(areaB.current?.style.width).toBe('300px');
+    expect(refA.current?.getHighlightElement()).toBe(areaA.current);
+    expect(refB.current?.getHighlightElement()).toBe(areaB.current);
+  }, 20000);
+
+  it('detaches the ref on unmount', async () => {
+    const ref = createRef<SheetViewerHandle>();
+    const areaRef = createRef<HTMLDivElement>();
+    const file = createCsvFile(sampleCsv);
+
+    const { unmount } = render(
+      <SheetViewer ref={ref} highlightAreaRef={areaRef} source={file} height={600} width={800} />
+    );
+    await multiSheetHelper(ref);
+
+    act(() => { ref.current?.setHighlight('A1:B2'); });
+    expect(areaRef.current).not.toBeNull();
+
+    unmount();
+    expect(areaRef.current).toBeNull();
+  }, 15000);
+});
+
+// =============================================
+// scrollToSelection — explicit, on-demand scroll
+// (jsdom has no layout, so clientHeight/clientWidth are 0 and the scroll math
+//  itself is covered in gridGeometry.test.ts; these cover the wiring.)
+// =============================================
+describe('SheetViewer — scrollToSelection', () => {
+  it('returns false when there is no selection', async () => {
+    const ref = createRef<SheetViewerHandle>();
+    const file = createCsvFile(sampleCsv);
+
+    render(<SheetViewer ref={ref} source={file} height={600} width={800} />);
+    await multiSheetHelper(ref);
+
+    expect(ref.current?.scrollToSelection()).toBe(false);
+  }, 15000);
+
+  it('returns true once a range is highlighted', async () => {
+    const ref = createRef<SheetViewerHandle>();
+    const file = createCsvFile(sampleCsv);
+
+    render(<SheetViewer ref={ref} source={file} height={600} width={800} />);
+    await multiSheetHelper(ref);
+
+    act(() => { ref.current?.setHighlight('A1:B2'); });
+    expect(ref.current?.scrollToSelection()).toBe(true);
+  }, 15000);
+
+  it('scrolls the container toward the selection', async () => {
+    const ref = createRef<SheetViewerHandle>();
+    const file = createCsvFile(sampleCsv);
+
+    render(<SheetViewer ref={ref} source={file} height={600} width={800} />);
+    await multiSheetHelper(ref);
+
+    const scroller = document.querySelector('.sv-grid-scroll') as HTMLElement;
+    expect(scroller).not.toBeNull();
+
+    act(() => { ref.current?.setHighlight('C30:D34'); });
+    act(() => { ref.current?.scrollToSelection(); });
+
+    // Row 30 starts at 29 * 26; with no measured viewport it aligns to the start
+    expect(scroller.scrollTop).toBe(29 * 26);
+    expect(scroller.scrollLeft).toBe(2 * 100);
+  }, 15000);
+
+  it('works for a multi-range selection by spanning their union', async () => {
+    const ref = createRef<SheetViewerHandle>();
+    const file = createCsvFile(sampleCsv);
+
+    render(<SheetViewer ref={ref} source={file} height={600} width={800} />);
+    await multiSheetHelper(ref);
+
+    const scroller = document.querySelector('.sv-grid-scroll') as HTMLElement;
+
+    act(() => { ref.current?.setHighlight('E20:F22,B25:C27'); });
+    act(() => { ref.current?.scrollToSelection(); });
+
+    // Union starts at row 20 (index 19) and column B (index 1)
+    expect(scroller.scrollTop).toBe(19 * 26);
+    expect(scroller.scrollLeft).toBe(1 * 100);
+  }, 15000);
+
+  it('returns false after the highlight is cleared', async () => {
+    const ref = createRef<SheetViewerHandle>();
+    const file = createCsvFile(sampleCsv);
+
+    render(<SheetViewer ref={ref} source={file} height={600} width={800} />);
+    await multiSheetHelper(ref);
+
+    act(() => { ref.current?.setHighlight('A1:B2'); });
+    expect(ref.current?.scrollToSelection()).toBe(true);
+
+    act(() => { ref.current?.clearHighlight(); });
+    expect(ref.current?.scrollToSelection()).toBe(false);
+  }, 15000);
+});

@@ -17,6 +17,7 @@ A high-performance React component for viewing and editing Excel and CSV files w
 - **Multiple sheets** — tab-based sheet switching with per-sheet selection state
 - **Range highlighting** — pass Excel-style references like `A1:D10` to highlight and scroll into view
 - **Clear highlight API** — remove the active range via `ref.current?.clearHighlight()` or `setHighlight('')`
+- **Highlight area ref** — get one DOM element spanning the whole highlighted range via `highlightAreaRef`, for anchoring your own popovers
 - **Single-cell focus without range tint** — clicking one cell focuses it and updates the formula bar, but does not create a visible 1x1 highlight
 - **Custom highlight colors** — override the selection fill and border color via props
 - **Separate search highlight** — Ctrl+F search uses its own independent highlight with customizable colors
@@ -115,6 +116,7 @@ The `source` prop accepts multiple formats:
 | `highlightColor` | `string` | — | Custom fill color for the highlighted range (e.g. `"rgba(255,0,0,0.1)"`) |
 | `highlightBorderColor` | `string` | — | Custom border color for the highlighted range (e.g. `"#ff0000"`) |
 | `highlightable` | `boolean` | `true` | When `false`, all selection/highlight visuals are suppressed |
+| `highlightAreaRef` | `Ref<HTMLDivElement>` | — | Receives one DOM element spanning the entire highlighted area; `null` when no highlight. See [Anchoring UI to the highlighted area](#anchoring-ui-to-the-highlighted-area) |
 | `gridLines` | `GridLineConfig[]` | — | Draw visible cell borders on specific ranges (like Excel's All Borders) |
 | `showToolbar` | `boolean` | `true` | Show or hide the entire toolbar row |
 | `showFileName` | `boolean` | `true` | Show or hide only the filename/logo in the toolbar. Charts & Download remain visible |
@@ -208,6 +210,8 @@ function App() {
 | `setHighlight(range, options?)` | `void` | Highlight a range. Pass `''` to clear. `{ silent: true }` suppresses `onSelectionChange` |
 | `clearHighlight(options?)` | `void` | Remove the current highlight. `{ silent: true }` suppresses `onSelectionChange` |
 | `getHighlight()` | `string \| null` | Current highlight/selection range string (e.g. `"A1:D10"`) |
+| `getHighlightElement()` | `HTMLElement \| null` | The single element spanning the highlighted area (same one `highlightAreaRef` receives) |
+| `scrollToSelection()` | `boolean` | Scroll so the whole selection is visible; `false` if nothing is selected |
 | `setColumnWidth(col, width, name?)` | `void` | Set column width in pixels (min 30px) |
 | `setRowHeight(row, height, name?)` | `void` | Set row height in pixels (min 20px) |
 | `getCellComment(cellRef, name?)` | `CellComment \| null` | Get comment for a cell |
@@ -405,6 +409,74 @@ Notes:
 
 - A plain single-cell click focuses the cell but does not create a visible highlighted range
 - `setHighlight('')`, `clearHighlight()`, or clearing the controlled `highlight` prop removes the current highlight
+
+---
+
+## Anchoring UI to the highlighted area
+
+`highlightAreaRef` gives you **one** DOM element that spans the entire highlighted area, so you can position your own popover, toolbar, or callout against it:
+
+```tsx
+import React, { useRef, useState, useEffect } from 'react';
+import { SheetViewer } from 'rc-sheet-viewer-17';
+import type { CellRange } from 'rc-sheet-viewer-17';
+
+function Example() {
+  const highlightAreaRef = useRef<HTMLDivElement>(null);
+  const [ranges, setRanges] = useState<CellRange[]>([]);
+  const [box, setBox] = useState<DOMRect | null>(null);
+
+  // Read the rect in an effect — see the note below on why not in the callback
+  useEffect(() => {
+    setBox(highlightAreaRef.current?.getBoundingClientRect() ?? null);
+  }, [ranges]);
+
+  return (
+    <>
+      <SheetViewer
+        source="/data.xlsx"
+        highlightAreaRef={highlightAreaRef}
+        onSelectionChange={(r) => setRanges(r)}
+        height={600}
+      />
+      {box && (
+        <div style={{ position: 'fixed', top: box.top - 32, left: box.left }}>
+          {ranges.length} range(s) selected
+        </div>
+      )}
+    </>
+  );
+}
+```
+
+The grid is virtualized, so the highlighted **cells** are not all in the DOM — most of a large range has no cell node at all. This element is a single invisible box covering the highlight's bounding rectangle instead, positioned in grid content coordinates. Behavior:
+
+- **One element, always.** For a multi-range highlight like `"A1:B2, D1:E3"` you get a single element spanning the union (`A1:E3`) — which also covers column `C`, since it is one rectangle.
+- **`null` when there is no highlight.** The element unmounts, so an object ref's `.current` becomes `null` and a callback ref is called with `null`.
+- Populated for **any** selection: `setHighlight()`, the `highlight` prop, drag-selection, and a plain single-cell click (even though a single click draws no tint).
+- Still provided when `highlightable={false}` — that prop suppresses *visuals*, and this element has none.
+- Stays pinned to the content while scrolling, and repositions when columns or rows are resized.
+- Invisible and `pointer-events: none`. You can style it via the `.sv-highlight-area` class if you want your own outline.
+
+> **Do not read the ref inside `onSelectionChange`.** That callback fires synchronously while the store updates, *before* React commits, so the element is not yet positioned (or may not exist). Store the ranges in state as above and read the rect in a `useEffect` / `useLayoutEffect`. If you call `setHighlight()` from outside a React event handler on React 17, updates are unbatched — wrap it in `unstable_batchedUpdates` or read the rect in a `requestAnimationFrame`.
+
+`ref.current?.getHighlightElement()` returns the same element if you already hold a `SheetViewerHandle` and would rather not pass a second ref.
+
+### Scrolling the selection into view
+
+`ref.current?.scrollToSelection()` scrolls so the **entire** selection is visible:
+
+```tsx
+viewerRef.current?.setHighlight('C400:F420');
+viewerRef.current?.scrollToSelection();
+```
+
+- Spans the **union** of every selected range, so multi-range highlights like `A1:B5,D1:E5` are fully revealed.
+- Moves the **minimum** amount needed on each axis — a selection already fully in view does not move, and an axis that is already visible is left alone.
+- A selection larger than the viewport is aligned to its top-left corner.
+- Returns `false` when there is no selection.
+
+This is separate from the automatic scroll that already runs when the selection changes; calling it does not alter that behavior.
 
 ---
 
