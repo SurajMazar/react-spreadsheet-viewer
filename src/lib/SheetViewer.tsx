@@ -3,7 +3,7 @@ import { ViewerProvider, useViewerStore, useViewerStoreApi } from './context/Vie
 import { useSourceLoader } from './hooks/useSourceLoader';
 import { useFileParser } from './hooks/useFileParser';
 import { parseRangeExpression } from './utils/rangeParser';
-import VirtualGrid from './components/Grid/VirtualGrid';
+import VirtualGrid, { type VirtualGridApi } from './components/Grid/VirtualGrid';
 import Toolbar from './components/Toolbar';
 import FormulaBar from './components/FormulaBar';
 import SheetTabs from './components/SheetTabs';
@@ -45,6 +45,7 @@ function SheetViewerInner({
   highlightColor,
   highlightBorderColor,
   highlightable = true,
+  highlightAreaRef,
   gridLines,
   showToolbar = true,
   showFileName = true,
@@ -81,6 +82,12 @@ function SheetViewerInner({
 
   // Flag to suppress onSelectionChange for silent setHighlight calls
   const suppressSelectionCb = useReactRef(false);
+
+  // Root element, so getHighlightElement() stays scoped to this viewer instance
+  const rootRef = useReactRef<HTMLDivElement>(null);
+
+  // VirtualGrid owns the scroll container; this is how the handle reaches it
+  const gridApiRef = useReactRef<VirtualGridApi | null>(null);
 
   const withOptionalSilentSelection = (
     options: { silent?: boolean } | undefined,
@@ -184,6 +191,11 @@ function SheetViewerInner({
       if (!sel || sel.ranges.length === 0) return null;
       return sel.rangeInput || null;
     },
+    // Scoped to this instance's root: an unscoped document lookup would resolve
+    // the wrong viewer when several are mounted on the same page.
+    getHighlightElement: () =>
+      rootRef.current?.querySelector<HTMLElement>('.sv-highlight-area') ?? null,
+    scrollToSelection: () => gridApiRef.current?.scrollSelectionIntoView() ?? false,
     getCellRangeData: (range: string, sheetName?: string) => {
       const s = storeApi.getState();
       const key = sheetName ?? s.activeSheet ?? '';
@@ -362,7 +374,7 @@ function SheetViewerInner({
   };
 
   return (
-    <div className={`sheet-viewer ${className}`.trim()} style={containerStyle}>
+    <div ref={rootRef} className={`sheet-viewer ${className}`.trim()} style={containerStyle}>
       {isLoadingAny && (
         <div className="sv-loading-overlay">
           <div className="sv-loading-card">
@@ -403,6 +415,8 @@ function SheetViewerInner({
                 highlightable={highlightable}
                 highlightColor={highlightColor}
                 highlightBorderColor={highlightBorderColor}
+                highlightAreaRef={highlightAreaRef}
+                gridApiRef={gridApiRef}
                 parsedGridLines={parsedGridLines.length > 0 ? parsedGridLines : undefined}
                 tabNavigation={tabNavigation}
               />

@@ -631,6 +631,20 @@
 }
 
 /* Copy indicator (marching ants) — a single overlay div over the copied range */
+/* Highlight area anchor — one invisible box spanning the whole highlighted range,
+   exposed via the `highlightAreaRef` prop and getHighlightElement(). Purely a
+   measurement/anchor target: it never paints and never takes pointer events
+   (without pointer-events: none it would swallow drag-selection and cell hover).
+   z-index sits above every cell decoration (merged 2, range border 3, search 4,
+   active 5) but below the copy indicator and chart overlays (10), so a consumer
+   who styles this class draws over the tints without covering those. */
+.sv-highlight-area {
+  position: absolute;
+  pointer-events: none;
+  background: transparent;
+  z-index: 6;
+}
+
 .sv-copy-indicator {
   position: absolute;
   pointer-events: none;

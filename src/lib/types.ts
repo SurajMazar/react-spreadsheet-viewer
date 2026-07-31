@@ -2,6 +2,8 @@
 // Shared type definitions for the SheetViewer component
 // ============================================================
 
+import type { Ref } from 'react';
+
 /** A single cell value in a sheet */
 export type CellValue = string | number | boolean | null | undefined;
 
@@ -219,6 +221,20 @@ export interface SheetViewerProps {
   highlightBorderColor?: string;
   /** Enable cell/range highlighting visuals (default: true). When false, active cell outline, range tint, and range borders are suppressed. */
   highlightable?: boolean;
+  /**
+   * Ref that receives a single DOM element covering the entire active highlighted
+   * area — the bounding box of all selected ranges, so one element contains every
+   * highlighted cell. Set to null when there is no highlight. Useful for anchoring
+   * a popover or toolbar to the highlighted section.
+   *
+   * Accepts an object ref or a callback ref. Populated for any non-empty selection
+   * (setHighlight, the `highlight` prop, drag-selection, single-cell click), and
+   * still provided when `highlightable` is false since it renders no visuals.
+   *
+   * Note: read it in an effect, not inside onSelectionChange — that callback fires
+   * before React commits, so the element is not positioned yet.
+   */
+  highlightAreaRef?: Ref<HTMLDivElement>;
   /** Grid line configs: ranges with visible cell borders (like Excel's All Borders) */
   gridLines?: GridLineConfig[];
   /** Show the toolbar (filename, Charts, Download buttons). Default: true */
@@ -275,6 +291,22 @@ export interface SheetViewerHandle {
   clearHighlight(options?: { silent?: boolean }): void;
   /** Get the current highlight/selection range as an Excel-style string (e.g. "A1:D10"), or null if none. */
   getHighlight(): string | null;
+  /**
+   * Get the single DOM element covering the active highlighted area (the bounding
+   * box of all selected ranges), or null when there is no highlight. Scoped to this
+   * viewer instance. Same element the `highlightAreaRef` prop receives.
+   */
+  getHighlightElement(): HTMLElement | null;
+  /**
+   * Scroll so the entire selection is visible, spanning the union of every selected
+   * range. Moves the minimum amount needed on each axis, so a selection already
+   * fully in view does not move; a selection larger than the viewport is aligned to
+   * its top-left. Returns false when there is no selection to scroll to.
+   *
+   * Independent of the automatic scroll that already runs when the selection
+   * changes — this is an explicit, on-demand call.
+   */
+  scrollToSelection(): boolean;
   /** Get cell values for a range expression (e.g. "A1:D10") from the active or named sheet */
   getCellRangeData(range: string, sheetName?: string): CellValue[][] | null;
   /** Get cell values for the currently selected range (drag/mouse selection). Returns null if no range is selected. */

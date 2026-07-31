@@ -6,6 +6,7 @@ import {
   isCellInRanges,
   getCellBorderInRanges,
   rangeToString,
+  unionRanges,
 } from '../rangeParser';
 
 describe('colLetterToIndex', () => {
@@ -147,5 +148,46 @@ describe('rangeToString', () => {
 
   it('formats a range', () => {
     expect(rangeToString({ startRow: 1, startCol: 1, endRow: 4, endCol: 3 })).toBe('B2:D5');
+  });
+});
+
+describe('unionRanges', () => {
+  it('returns null for an empty list', () => {
+    expect(unionRanges([])).toBeNull();
+  });
+
+  it('returns the same box for a single range', () => {
+    const r = { startRow: 1, startCol: 1, endRow: 4, endCol: 3 };
+    expect(unionRanges([r])).toEqual(r);
+  });
+
+  it('covers two disjoint ranges (A1:B5,D1:E5)', () => {
+    const ranges = parseRangeExpression('A1:B5,D1:E5', 100, 26);
+    expect(ranges.length).toBe(2);
+    expect(unionRanges(ranges)).toEqual({
+      startRow: 0,
+      startCol: 0,
+      endRow: 4,
+      endCol: 4,
+    });
+  });
+
+  it('covers three ranges including a whole column', () => {
+    const ranges = parseRangeExpression('A1:B2,D4:D5,F:F', 10, 26);
+    expect(unionRanges(ranges)).toEqual({
+      startRow: 0,
+      startCol: 0,
+      endRow: 9,
+      endCol: 5,
+    });
+  });
+
+  it('normalizes a non-normalized range', () => {
+    expect(unionRanges([{ startRow: 5, startCol: 5, endRow: 1, endCol: 2 }])).toEqual({
+      startRow: 1,
+      startCol: 2,
+      endRow: 5,
+      endCol: 5,
+    });
   });
 });

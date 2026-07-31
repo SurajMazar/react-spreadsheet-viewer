@@ -148,6 +148,28 @@ export function isCellInRanges(row: number, col: number, ranges: CellRange[]): b
   return false;
 }
 
+/**
+ * Bounding box covering every given range. Returns null for an empty list.
+ * Taking min/max over both corners normalizes non-normalized ranges for free.
+ */
+export function unionRanges(ranges: CellRange[]): CellRange | null {
+  if (!ranges || ranges.length === 0) return null;
+
+  let startRow = Infinity;
+  let startCol = Infinity;
+  let endRow = -Infinity;
+  let endCol = -Infinity;
+
+  for (const r of ranges) {
+    startRow = Math.min(startRow, r.startRow, r.endRow);
+    endRow = Math.max(endRow, r.startRow, r.endRow);
+    startCol = Math.min(startCol, r.startCol, r.endCol);
+    endCol = Math.max(endCol, r.startCol, r.endCol);
+  }
+
+  return { startRow, startCol, endRow, endCol };
+}
+
 export interface CellBorders {
   top: boolean;
   bottom: boolean;

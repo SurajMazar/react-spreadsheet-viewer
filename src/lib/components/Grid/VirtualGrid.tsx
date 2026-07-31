@@ -1,7 +1,8 @@
-import React, { useCallback, useRef, useEffect, useState, useMemo, type MouseEvent } from 'react';
+import React, { useCallback, useRef, useEffect, useState, useMemo, type MouseEvent, type Ref, type MutableRefObject } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useViewerStore, EMPTY_SELECTION, EMPTY_RANGES } from '../../context/ViewerContext';
-import { colIndexToLetter, isCellInRanges } from '../../utils/rangeParser';
+import { colIndexToLetter, isCellInRanges, unionRanges } from '../../utils/rangeParser';
+import { getRangeBox, getScrollToReveal } from '../../utils/gridGeometry';
 import { extractCellsFromRange, extractStylesFromRange, copyRangeToClipboard, pasteFromClipboard } from '../../utils/clipboard';
 import Cell from './Cell';
 import EditableCell from './EditableCell';
@@ -19,10 +20,18 @@ interface EditingCell {
   col: number;
 }
 
+/** Internal imperative surface, so SheetViewer's handle can reach the scroll container. */
+export interface VirtualGridApi {
+  /** Scroll the whole selection into view. False when there is nothing to scroll to. */
+  scrollSelectionIntoView: () => boolean;
+}
+
 interface VirtualGridProps {
   highlightable?: boolean;
   highlightColor?: string;
   highlightBorderColor?: string;
+  highlightAreaRef?: Ref<HTMLDivElement>;
+  gridApiRef?: MutableRefObject<VirtualGridApi | null>;
   parsedGridLines?: ParsedGridLineConfig[];
   tabNavigation?: boolean;
 }
@@ -31,6 +40,8 @@ export default function VirtualGrid({
   highlightable = true,
   highlightColor,
   highlightBorderColor,
+  highlightAreaRef,
+  gridApiRef,
   parsedGridLines,
   tabNavigation = true,
 }: VirtualGridProps) {
@@ -210,6 +221,45 @@ export default function VirtualGrid({
       colVirtualizerRef.current.scrollToIndex(activeCell.col, { align: 'auto' });
     }
   }, [activeCell]);
+
+  // Imperative scroll for ref.scrollToSelection(). Separate from the auto-scroll
+  // effect above, which is left as-is: that one reacts to selection changes and
+  // centers ranges[0]. This one is explicit, spans the union of every range, and
+  // moves the minimum needed to reveal the whole box — so a selection already in
+  // view does not jump. Offsets are set on the scroll element directly rather
+  // than via scrollToIndex, which can only align a single index.
+  const scrollSelectionIntoView = useCallback((): boolean => {
+    const el = scrollRef.current;
+    if (!el) return false;
+
+    const union = unionRanges(ranges);
+    if (!union) return false;
+
+    const box = getRangeBox(
+      union,
+      rowVirtualizerRef.current.measurementsCache,
+      colVirtualizerRef.current.measurementsCache
+    );
+    if (!box) return false;
+
+    const next = getScrollToReveal(box, {
+      scrollTop: el.scrollTop,
+      scrollLeft: el.scrollLeft,
+      clientWidth: el.clientWidth,
+      clientHeight: el.clientHeight,
+    });
+    el.scrollTop = next.scrollTop;
+    el.scrollLeft = next.scrollLeft;
+    return true;
+  }, [ranges]);
+
+  useEffect(() => {
+    if (!gridApiRef) return;
+    gridApiRef.current = { scrollSelectionIntoView };
+    return () => {
+      gridApiRef.current = null;
+    };
+  }, [gridApiRef, scrollSelectionIntoView]);
 
   const onCellClick = useCallback(
     (row: number, col: number) => {
@@ -523,8 +573,25 @@ export default function VirtualGrid({
     };
   }, [resizingCol, resizingRow, activeSheet, setColumnWidth, setRowHeight]);
 
+  const highlightUnion = useMemo(() => unionRanges(ranges), [ranges]);
+
+  // Must run before reading measurementsCache — getVirtualItems() is what populates it.
   const virtualRows = rowVirtualizer.getVirtualItems();
   const virtualCols = colVirtualizer.getVirtualItems();
+
+  // Single box spanning the whole highlight, for the highlightAreaRef anchor element.
+  // Read straight from the virtualizer's measurements so the box matches the cells
+  // exactly under column/row resize. Not memoized on purpose: it is four array reads,
+  // and a memo keyed on the union would go stale when a column is resized.
+  const highlightBox = highlightUnion
+    ? getRangeBox(highlightUnion, rowVirtualizer.measurementsCache, colVirtualizer.measurementsCache)
+    : null;
+
+  // Same measured geometry for the copy indicator, which previously multiplied the
+  // default COL_WIDTH/ROW_HEIGHT and so was misplaced on resized rows/columns.
+  const copiedBox = copiedRange
+    ? getRangeBox(copiedRange, rowVirtualizer.measurementsCache, colVirtualizer.measurementsCache)
+    : null;
 
   if (!sheetData) return null;
 
@@ -751,17 +818,39 @@ export default function VirtualGrid({
               );
             })
           )}
+
+          {/*
+            Highlight area anchor — one invisible element spanning the entire
+            highlighted range, exposed via the highlightAreaRef prop and
+            getHighlightElement(). Lives inside the sizer so its top/left are in
+            the same content coordinates as the cells, which keeps it pinned to
+            the content while scrolling. Derived from `ranges`, never activeCell:
+            the declarative `highlight` prop intentionally leaves activeCell null.
+          */}
+          {highlightBox && (
+            <div
+              ref={highlightAreaRef}
+              className="sv-highlight-area"
+              aria-hidden="true"
+              style={{
+                top: highlightBox.top,
+                left: highlightBox.left,
+                width: highlightBox.width,
+                height: highlightBox.height,
+              }}
+            />
+          )}
         </div>
 
         {/* Marching ants copy indicator */}
-        {highlightable && copiedRange && (
+        {highlightable && copiedBox && (
           <div
             className="sv-copy-indicator"
             style={{
-              top: copiedRange.startRow * ROW_HEIGHT,
-              left: copiedRange.startCol * COL_WIDTH,
-              width: (copiedRange.endCol - copiedRange.startCol + 1) * COL_WIDTH,
-              height: (copiedRange.endRow - copiedRange.startRow + 1) * ROW_HEIGHT,
+              top: copiedBox.top,
+              left: copiedBox.left,
+              width: copiedBox.width,
+              height: copiedBox.height,
             }}
           />
         )}
