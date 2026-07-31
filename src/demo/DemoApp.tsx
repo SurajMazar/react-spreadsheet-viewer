@@ -425,6 +425,11 @@ export default function DemoApp() {
             onCellChange={handleCellChange}
             onSelectionChange={handleSelectionChange}
             highlightAreaRef={highlightAreaRef}
+            highlightAreaProps={{
+              id: 'demo-highlight-area',
+              'data-testid': 'highlight-area',
+              title: 'Highlighted region',
+            }}
             downloadable={downloadable}
             searchable={searchable}
             chartable={chartable}

@@ -2,7 +2,20 @@
 // Shared type definitions for the SheetViewer component
 // ============================================================
 
-import type { Ref } from 'react';
+import type { HTMLAttributes, Ref } from 'react';
+
+/**
+ * Extra attributes applied to the highlight area element (the one
+ * `highlightAreaRef` receives) — `id`, `data-*`, `aria-*`, `title`, `className`,
+ * `style`, event handlers, and so on.
+ *
+ * `className` is appended to `sv-highlight-area` rather than replacing it, and
+ * the element's computed geometry (top/left/width/height) always wins over any
+ * `style` passed here — everything else in `style` is applied as given.
+ */
+export type HighlightAreaAttributes = HTMLAttributes<HTMLDivElement> & {
+  [key: `data-${string}`]: string | number | boolean | undefined;
+};
 
 /** A single cell value in a sheet */
 export type CellValue = string | number | boolean | null | undefined;
@@ -235,6 +248,18 @@ export interface SheetViewerProps {
    * before React commits, so the element is not positioned yet.
    */
   highlightAreaRef?: Ref<HTMLDivElement>;
+  /**
+   * Extra HTML attributes for the highlight area element — `id`, `data-*`,
+   * `aria-*`, `className`, `style`, event handlers, etc. Useful for hooking the
+   * highlighted region up to `aria-describedby`, a test id, or a popover library
+   * that resolves its anchor by id.
+   *
+   * `className` is appended to `sv-highlight-area` (never replaces it) and the
+   * element's own geometry always wins over `style`. The element is
+   * `pointer-events: none` by default; pass `style={{ pointerEvents: 'auto' }}`
+   * to make it interactive.
+   */
+  highlightAreaProps?: HighlightAreaAttributes;
   /** Grid line configs: ranges with visible cell borders (like Excel's All Borders) */
   gridLines?: GridLineConfig[];
   /** Show the toolbar (filename, Charts, Download buttons). Default: true */

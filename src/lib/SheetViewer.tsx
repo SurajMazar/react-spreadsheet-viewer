@@ -46,6 +46,7 @@ function SheetViewerInner({
   highlightBorderColor,
   highlightable = true,
   highlightAreaRef,
+  highlightAreaProps,
   gridLines,
   showToolbar = true,
   showFileName = true,
@@ -416,6 +417,7 @@ function SheetViewerInner({
                 highlightColor={highlightColor}
                 highlightBorderColor={highlightBorderColor}
                 highlightAreaRef={highlightAreaRef}
+                highlightAreaProps={highlightAreaProps}
                 gridApiRef={gridApiRef}
                 parsedGridLines={parsedGridLines.length > 0 ? parsedGridLines : undefined}
                 tabNavigation={tabNavigation}

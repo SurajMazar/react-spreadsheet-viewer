@@ -781,6 +781,81 @@ describe('SheetViewer — highlightAreaRef', () => {
 });
 
 // =============================================
+// highlightAreaProps — extra attributes on the highlight area element
+// =============================================
+describe('SheetViewer — highlightAreaProps', () => {
+  const renderWithProps = async (
+    props: React.ComponentProps<typeof SheetViewer>['highlightAreaProps']
+  ) => {
+    const ref = createRef<SheetViewerHandle>();
+    const areaRef = createRef<HTMLDivElement>();
+    render(
+      <SheetViewer
+        ref={ref}
+        highlightAreaRef={areaRef}
+        highlightAreaProps={props}
+        source={createCsvFile(sampleCsv)}
+        height={600}
+        width={800}
+      />
+    );
+    await multiSheetHelper(ref);
+    act(() => { ref.current?.setHighlight('A1:B2'); });
+    return { ref, areaRef };
+  };
+
+  it('applies an id to the highlight area element', async () => {
+    const { areaRef } = await renderWithProps({ id: 'my-anchor' });
+    expect(areaRef.current?.id).toBe('my-anchor');
+    expect(document.getElementById('my-anchor')).toBe(areaRef.current);
+  }, 15000);
+
+  it('applies data-* and aria attributes', async () => {
+    const { areaRef } = await renderWithProps({
+      'data-testid': 'highlight-box',
+      'data-region': 'totals',
+      title: 'Selected region',
+    });
+    expect(areaRef.current?.getAttribute('data-testid')).toBe('highlight-box');
+    expect(areaRef.current?.getAttribute('data-region')).toBe('totals');
+    expect(areaRef.current?.getAttribute('title')).toBe('Selected region');
+  }, 15000);
+
+  it('appends className instead of replacing sv-highlight-area', async () => {
+    const { ref, areaRef } = await renderWithProps({ className: 'my-anchor-class' });
+    expect(areaRef.current?.classList.contains('sv-highlight-area')).toBe(true);
+    expect(areaRef.current?.classList.contains('my-anchor-class')).toBe(true);
+    // getHighlightElement queries .sv-highlight-area, so it must still resolve
+    expect(ref.current?.getHighlightElement()).toBe(areaRef.current);
+  }, 15000);
+
+  it('merges style but keeps the measured geometry authoritative', async () => {
+    const { areaRef } = await renderWithProps({
+      style: { pointerEvents: 'auto', outline: '2px dashed red', top: 9999, width: 1 },
+    });
+    const el = areaRef.current!;
+    expect(el.style.pointerEvents).toBe('auto');
+    expect(el.style.outline).toBe('2px dashed red');
+    // Consumer top/width must not win over the computed box (A1:B2 => 200x52 at 0,0)
+    expect(el.style.top).toBe('0px');
+    expect(el.style.width).toBe('200px');
+    expect(el.style.height).toBe('52px');
+  }, 15000);
+
+  it('allows overriding the default aria-hidden', async () => {
+    const { areaRef } = await renderWithProps({ 'aria-hidden': false, role: 'presentation' });
+    expect(areaRef.current?.getAttribute('aria-hidden')).toBe('false');
+    expect(areaRef.current?.getAttribute('role')).toBe('presentation');
+  }, 15000);
+
+  it('is aria-hidden by default when no props are passed', async () => {
+    const { areaRef } = await renderWithProps(undefined);
+    expect(areaRef.current?.getAttribute('aria-hidden')).toBe('true');
+    expect(areaRef.current?.className).toBe('sv-highlight-area');
+  }, 15000);
+});
+
+// =============================================
 // scrollToSelection — explicit, on-demand scroll
 // (jsdom has no layout, so clientHeight/clientWidth are 0 and the scroll math
 //  itself is covered in gridGeometry.test.ts; these cover the wiring.)

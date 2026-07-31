@@ -117,6 +117,7 @@ The `source` prop accepts multiple formats:
 | `highlightBorderColor` | `string` | — | Custom border color for the highlighted range (e.g. `"#ff0000"`) |
 | `highlightable` | `boolean` | `true` | When `false`, all selection/highlight visuals are suppressed |
 | `highlightAreaRef` | `Ref<HTMLDivElement>` | — | Receives one DOM element spanning the entire highlighted area; `null` when no highlight. See [Anchoring UI to the highlighted area](#anchoring-ui-to-the-highlighted-area) |
+| `highlightAreaProps` | `HighlightAreaAttributes` | — | Extra HTML attributes (`id`, `data-*`, `style`, handlers…) for that element. `className` is appended to `sv-highlight-area`; geometry always wins over `style` |
 | `gridLines` | `GridLineConfig[]` | — | Draw visible cell borders on specific ranges (like Excel's All Borders) |
 | `showToolbar` | `boolean` | `true` | Show or hide the entire toolbar row |
 | `showFileName` | `boolean` | `true` | Show or hide only the filename/logo in the toolbar. Charts & Download remain visible |
@@ -461,6 +462,29 @@ The grid is virtualized, so the highlighted **cells** are not all in the DOM —
 > **Do not read the ref inside `onSelectionChange`.** That callback fires synchronously while the store updates, *before* React commits, so the element is not yet positioned (or may not exist). Store the ranges in state as above and read the rect in a `useEffect` / `useLayoutEffect`. If you call `setHighlight()` from outside a React event handler on React 17, updates are unbatched — wrap it in `unstable_batchedUpdates` or read the rect in a `requestAnimationFrame`.
 
 `ref.current?.getHighlightElement()` returns the same element if you already hold a `SheetViewerHandle` and would rather not pass a second ref.
+
+### Attributes on the highlight area
+
+`highlightAreaProps` puts arbitrary HTML attributes on that same element — an `id` for a popover library to resolve as its anchor, a test id, ARIA wiring, or your own styling:
+
+```tsx
+<SheetViewer
+  source={file}
+  highlightAreaProps={{
+    id: 'selection-anchor',
+    'data-testid': 'highlight-box',
+    style: { pointerEvents: 'auto', outline: '2px dashed #e53935' },
+    onClick: () => console.log('highlight clicked'),
+  }}
+/>
+```
+
+Two merge rules keep the element working:
+
+- **`className` is appended** to `sv-highlight-area`, never replaces it — the class carries the CSS and is what `getHighlightElement()` queries.
+- **The measured geometry wins** over `style`. `top`/`left`/`width`/`height` are always the computed box; everything else in `style` is applied as given.
+
+`aria-hidden="true"` is the default and can be overridden. The element is `pointer-events: none` by default — set `pointerEvents: 'auto'` if you want it clickable (note that this makes it swallow drag-selection over the highlighted cells).
 
 ### Scrolling the selection into view
 

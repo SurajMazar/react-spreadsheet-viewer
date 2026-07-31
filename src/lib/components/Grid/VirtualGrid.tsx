@@ -8,7 +8,7 @@ import Cell from './Cell';
 import EditableCell from './EditableCell';
 import ChartOverlays from '../ChartOverlays';
 import { evaluateConditionalFormats } from '../../conditionalFormat/evaluator';
-import type { MergeCell, CellStyle, CellValueChange, CellStyleChange, ParsedGridLineConfig } from '../../types';
+import type { MergeCell, CellStyle, CellValueChange, CellStyleChange, ParsedGridLineConfig, HighlightAreaAttributes } from '../../types';
 
 export const COL_WIDTH = 100;
 export const ROW_HEIGHT = 26;
@@ -31,6 +31,7 @@ interface VirtualGridProps {
   highlightColor?: string;
   highlightBorderColor?: string;
   highlightAreaRef?: Ref<HTMLDivElement>;
+  highlightAreaProps?: HighlightAreaAttributes;
   gridApiRef?: MutableRefObject<VirtualGridApi | null>;
   parsedGridLines?: ParsedGridLineConfig[];
   tabNavigation?: boolean;
@@ -41,6 +42,7 @@ export default function VirtualGrid({
   highlightColor,
   highlightBorderColor,
   highlightAreaRef,
+  highlightAreaProps,
   gridApiRef,
   parsedGridLines,
   tabNavigation = true,
@@ -587,6 +589,16 @@ export default function VirtualGrid({
     ? getRangeBox(highlightUnion, rowVirtualizer.measurementsCache, colVirtualizer.measurementsCache)
     : null;
 
+  // className and style are merged rather than spread, so consumer attributes can
+  // never drop `sv-highlight-area` (the CSS hook and what getHighlightElement
+  // queries) or fight the measured geometry. aria-hidden is written before the
+  // spread so it stays overridable.
+  const {
+    className: highlightAreaClassName,
+    style: highlightAreaStyle,
+    ...highlightAreaRest
+  } = highlightAreaProps ?? {};
+
   // Same measured geometry for the copy indicator, which previously multiplied the
   // default COL_WIDTH/ROW_HEIGHT and so was misplaced on resized rows/columns.
   const copiedBox = copiedRange
@@ -830,9 +842,15 @@ export default function VirtualGrid({
           {highlightBox && (
             <div
               ref={highlightAreaRef}
-              className="sv-highlight-area"
               aria-hidden="true"
+              {...highlightAreaRest}
+              className={
+                highlightAreaClassName
+                  ? `sv-highlight-area ${highlightAreaClassName}`
+                  : 'sv-highlight-area'
+              }
               style={{
+                ...highlightAreaStyle,
                 top: highlightBox.top,
                 left: highlightBox.left,
                 width: highlightBox.width,

@@ -20,6 +20,7 @@ export type {
   ValidationRule,
   ValidationRuleType,
   GridLineConfig,
+  HighlightAreaAttributes,
   GridLineBorderStyle,
   ParsedGridLineConfig,
   SheetViewerTheme,
