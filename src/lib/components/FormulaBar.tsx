@@ -1,8 +1,30 @@
 import React, { useState, useCallback, useEffect, useRef, type FormEvent, type KeyboardEvent } from 'react';
 import { useViewerStore, EMPTY_SELECTION } from '../context/ViewerContext';
 import { parseRangeExpression, colIndexToLetter } from '../utils/rangeParser';
+import ZoomControl from './ZoomControl';
+import ToolsSection from './ToolsSection';
+import type { SheetViewerHandle, SheetViewerTool, SheetViewerToolsPlacement } from '../types';
 
-export default function FormulaBar() {
+export interface FormulaBarProps {
+  /** Show the zoom control. */
+  zoomable?: boolean;
+  /** Which end of the bar the zoom control sits at. */
+  zoomPlacement?: SheetViewerToolsPlacement;
+  /** Consumer-registered tools. */
+  tools?: SheetViewerTool[];
+  /** Which end of the bar the tools sit at. */
+  toolsPlacement?: SheetViewerToolsPlacement;
+  /** Imperative API passed to each tool's context. */
+  viewerApi?: SheetViewerHandle;
+}
+
+export default function FormulaBar({
+  zoomable = true,
+  zoomPlacement = 'left',
+  tools,
+  toolsPlacement = 'left',
+  viewerApi,
+}: FormulaBarProps) {
   const activeSheet = useViewerStore((s) => s.activeSheet);
   const activeCell = useViewerStore((s) => s.activeCell);
   const setSelectionRanges = useViewerStore((s) => s.setSelectionRanges);
@@ -51,6 +73,37 @@ export default function FormulaBar() {
     [currentSelection.rangeInput]
   );
 
+  /**
+   * Tools for one end of the bar. A tool's own `placement` wins over the
+   * viewer-wide `toolsPlacement`, so most tools follow the default while an
+   * individual one can be pinned to the opposite end.
+   *
+   * Tools need the imperative API to act on the viewer; without it there is
+   * nothing for them to drive, so none are rendered.
+   */
+  const toolsFor = (side: SheetViewerToolsPlacement) =>
+    viewerApi ? (tools ?? []).filter((tool) => (tool.placement ?? toolsPlacement) === side) : [];
+
+  /**
+   * One action group per end of the bar. Tools and zoom are placed
+   * independently, so they may share a group or sit at opposite ends; a group
+   * with nothing in it is not rendered at all, leaving no stray divider.
+   */
+  const renderActions = (side: SheetViewerToolsPlacement) => {
+    const sideTools = toolsFor(side);
+    const showTools = sideTools.length > 0;
+    const showZoom = zoomable && zoomPlacement === side;
+    if (!showTools && !showZoom) return null;
+
+    return (
+      <div className={`sv-formula-bar-actions sv-formula-bar-actions-${side}`}>
+        {showTools && <ToolsSection tools={sideTools} viewer={viewerApi!} />}
+        {showTools && showZoom && <div className="sv-toolbar-divider" />}
+        {showZoom && <ZoomControl align={side} />}
+      </div>
+    );
+  };
+
   const cellValue = useViewerStore((s) => {
     if (!s.activeCell || !s.activeSheet) return '';
     const sheet = s.sheets[s.activeSheet];
@@ -62,6 +115,10 @@ export default function FormulaBar() {
 
   return (
     <div className="sv-formula-bar">
+      {/* Tools and zoom live in the formula bar rather than the toolbar, so they
+          stay reachable even when `showToolbar` is false. */}
+      {renderActions('left')}
+
       <div className="sv-formula-bar-cell-ref">
         <form onSubmit={handleSubmit}>
           <input
@@ -89,6 +146,8 @@ export default function FormulaBar() {
           placeholder=""
         />
       </div>
+
+      {renderActions('right')}
     </div>
   );
 }

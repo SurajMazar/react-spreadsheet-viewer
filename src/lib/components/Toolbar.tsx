@@ -9,7 +9,11 @@ export interface ToolbarProps {
   showFileName?: boolean;
 }
 
-export default function Toolbar({ downloadable = false, chartable = true, showFileName = true }: ToolbarProps) {
+export default function Toolbar({
+  downloadable = false,
+  chartable = true,
+  showFileName = true,
+}: ToolbarProps) {
   const fileName = useViewerStore((s) => s.fileName);
   const activeCell = useViewerStore((s) => s.activeCell);
   const activeSheet = useViewerStore((s) => s.activeSheet);

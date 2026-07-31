@@ -3,13 +3,16 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { useViewerStore, EMPTY_SELECTION, EMPTY_RANGES } from '../../context/ViewerContext';
 import { colIndexToLetter, isCellInRanges, unionRanges } from '../../utils/rangeParser';
 import { getRangeBox, getScrollToReveal } from '../../utils/gridGeometry';
+import { scaleToZoom } from '../../utils/zoom';
+import { computeAutoFitWidth, createCanvasTextMeasurer, resolveAutoFitFont } from '../../utils/autoFit';
 import { extractCellsFromRange, extractStylesFromRange, copyRangeToClipboard, pasteFromClipboard } from '../../utils/clipboard';
 import Cell from './Cell';
 import EditableCell from './EditableCell';
 import ChartOverlays from '../ChartOverlays';
 import { evaluateConditionalFormats } from '../../conditionalFormat/evaluator';
-import type { MergeCell, CellStyle, CellValueChange, CellStyleChange, ParsedGridLineConfig } from '../../types';
+import type { MergeCell, CellStyle, CellValueChange, CellStyleChange, ParsedGridLineConfig, HighlightAreaAttributes } from '../../types';
 
+/** Base geometry, in unzoomed pixels. Every rendered size derives from these. */
 export const COL_WIDTH = 100;
 export const ROW_HEIGHT = 26;
 export const ROW_HEADER_WIDTH = 50;
@@ -31,6 +34,7 @@ interface VirtualGridProps {
   highlightColor?: string;
   highlightBorderColor?: string;
   highlightAreaRef?: Ref<HTMLDivElement>;
+  highlightAreaProps?: HighlightAreaAttributes;
   gridApiRef?: MutableRefObject<VirtualGridApi | null>;
   parsedGridLines?: ParsedGridLineConfig[];
   tabNavigation?: boolean;
@@ -41,6 +45,7 @@ export default function VirtualGrid({
   highlightColor,
   highlightBorderColor,
   highlightAreaRef,
+  highlightAreaProps,
   gridApiRef,
   parsedGridLines,
   tabNavigation = true,
@@ -65,6 +70,9 @@ export default function VirtualGrid({
   const mode = useViewerStore((s) => s.mode);
   const isProgrammaticHighlight = useViewerStore((s) => s.isProgrammaticHighlight);
   const setProgrammaticHighlight = useViewerStore((s) => s.setProgrammaticHighlight);
+  const zoom = useViewerStore((s) => s.zoom);
+  const zoomIn = useViewerStore((s) => s.zoomIn);
+  const zoomOut = useViewerStore((s) => s.zoomOut);
 
   const currentSelection = useViewerStore(
     (s) => (s.activeSheet ? s.selections[s.activeSheet] : null) ?? EMPTY_SELECTION
@@ -109,6 +117,16 @@ export default function VirtualGrid({
     if (!el) return;
 
     const handleWheel = (e: WheelEvent) => {
+      // Ctrl/Cmd+wheel → zoom, matching Excel and Google Sheets. Taking the
+      // gesture means the browser will not also zoom the whole page.
+      if ((e.ctrlKey || e.metaKey) && Math.abs(e.deltaY) > 0) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.deltaY < 0) zoomIn();
+        else zoomOut();
+        return;
+      }
+
       // Prevent parent containers from capturing horizontal scroll
       if (Math.abs(e.deltaX) > 0) {
         e.stopPropagation();
@@ -123,27 +141,46 @@ export default function VirtualGrid({
 
     el.addEventListener('wheel', handleWheel, { passive: false });
     return () => el.removeEventListener('wheel', handleWheel);
-  }, []);
+  }, [zoomIn, zoomOut]);
 
   const dataCols = sheetData?.cols || 0;
   const dataRows = sheetData?.rows || 0;
   const colWidths = sheetData?.colWidths;
   const rowHeights = sheetData?.rowHeights;
 
-  // Extend columns and rows beyond data to fill viewport (like Google Sheets)
-  const visibleCols = Math.ceil(containerSize.width / COL_WIDTH);
-  const visibleRows = Math.ceil(containerSize.height / ROW_HEIGHT);
+  // Header bands scale with zoom too, so the whole sheet reads as one document
+  // rather than full-size chrome around a shrunken grid.
+  const rowHeaderWidth = scaleToZoom(ROW_HEADER_WIDTH, zoom);
+  const colHeaderHeight = scaleToZoom(COL_HEADER_HEIGHT, zoom);
+
+  // Extend columns and rows beyond data to fill viewport (like Google Sheets).
+  // Measured against the zoomed cell size, so zooming out still fills the page.
+  const visibleCols = Math.ceil(containerSize.width / scaleToZoom(COL_WIDTH, zoom));
+  const visibleRows = Math.ceil(containerSize.height / scaleToZoom(ROW_HEIGHT, zoom));
   const effectiveCols = Math.max(dataCols, visibleCols + 5);
   const effectiveRows = Math.max(dataRows, visibleRows + 10);
 
-  const getColWidth = useCallback(
+  // Base (unzoomed) sizes: what the store holds and what resize/auto-fit write.
+  const getBaseColWidth = useCallback(
     (index: number) => (colWidths && index < colWidths.length && colWidths[index]) ? colWidths[index] : COL_WIDTH,
     [colWidths]
   );
 
-  const getRowHeight = useCallback(
+  const getBaseRowHeight = useCallback(
     (index: number) => (rowHeights && index < rowHeights.length && rowHeights[index]) ? rowHeights[index] : ROW_HEIGHT,
     [rowHeights]
+  );
+
+  // Rendered sizes: zoom is applied here and nowhere else, so the virtualizer's
+  // measurements — and every overlay that reads them — are already in screen px.
+  const getColWidth = useCallback(
+    (index: number) => scaleToZoom(getBaseColWidth(index), zoom),
+    [getBaseColWidth, zoom]
+  );
+
+  const getRowHeight = useCallback(
+    (index: number) => scaleToZoom(getBaseRowHeight(index), zoom),
+    [getBaseRowHeight, zoom]
   );
 
   const rowVirtualizer = useVirtualizer({
@@ -167,14 +204,16 @@ export default function VirtualGrid({
   rowVirtualizerRef.current = rowVirtualizer;
   colVirtualizerRef.current = colVirtualizer;
 
-  // Invalidate virtualizer measurement cache when column/row sizes change
+  // Invalidate virtualizer measurement cache when column/row sizes change.
+  // Zoom is a size change too — without this the grid keeps the old pixel
+  // offsets and the cells drift away from the headers.
   useEffect(() => {
     colVirtualizer.measure();
-  }, [colWidths, colVirtualizer]);
+  }, [colWidths, zoom, colVirtualizer]);
 
   useEffect(() => {
     rowVirtualizer.measure();
-  }, [rowHeights, rowVirtualizer]);
+  }, [rowHeights, zoom, rowVirtualizer]);
 
   // Auto-scroll to selection only when the full range is not visible in the viewport
   useEffect(() => {
@@ -528,9 +567,9 @@ export default function VirtualGrid({
       e.stopPropagation();
       setResizingCol(colIndex);
       resizeStartX.current = e.clientX;
-      resizeStartSize.current = getColWidth(colIndex);
+      resizeStartSize.current = getBaseColWidth(colIndex);
     },
-    [getColWidth]
+    [getBaseColWidth]
   );
 
   const onRowResizeStart = useCallback(
@@ -539,22 +578,47 @@ export default function VirtualGrid({
       e.stopPropagation();
       setResizingRow(rowIndex);
       resizeStartY.current = e.clientY;
-      resizeStartSize.current = getRowHeight(rowIndex);
+      resizeStartSize.current = getBaseRowHeight(rowIndex);
     },
-    [getRowHeight]
+    [getBaseRowHeight]
+  );
+
+  /**
+   * Double-clicking the resize handle fits the column to its content, the same
+   * gesture Excel and Google Sheets use. Written as a base (unzoomed) width, so
+   * the fit holds when the zoom changes afterwards.
+   */
+  const onColAutoFit = useCallback(
+    (e: MouseEvent, colIndex: number) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!activeSheet || !sheetData) return;
+
+      const measure = createCanvasTextMeasurer();
+      if (!measure) return;
+
+      const width = computeAutoFitWidth(colIndex, sheetData, measure, {
+        font: resolveAutoFitFont(scrollRef.current),
+      });
+      if (width !== null) setColumnWidth(activeSheet, colIndex, width);
+    },
+    [activeSheet, sheetData, setColumnWidth]
   );
 
   useEffect(() => {
     if (resizingCol === null && resizingRow === null) return;
 
+    // The pointer moves in screen pixels but the store holds base sizes, so the
+    // travel is divided back out by the zoom — otherwise a drag at 50% zoom
+    // would resize the column twice as fast as the cursor moves.
     const handleMouseMove = (e: globalThis.MouseEvent) => {
       if (resizingCol !== null && activeSheet) {
-        const delta = e.clientX - resizeStartX.current;
+        const delta = (e.clientX - resizeStartX.current) / zoom;
         const newWidth = Math.max(30, resizeStartSize.current + delta);
         setColumnWidth(activeSheet, resizingCol, newWidth);
       }
       if (resizingRow !== null && activeSheet) {
-        const delta = e.clientY - resizeStartY.current;
+        const delta = (e.clientY - resizeStartY.current) / zoom;
         const newHeight = Math.max(20, resizeStartSize.current + delta);
         setRowHeight(activeSheet, resizingRow, newHeight);
       }
@@ -571,7 +635,7 @@ export default function VirtualGrid({
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [resizingCol, resizingRow, activeSheet, setColumnWidth, setRowHeight]);
+  }, [resizingCol, resizingRow, activeSheet, setColumnWidth, setRowHeight, zoom]);
 
   const highlightUnion = useMemo(() => unionRanges(ranges), [ranges]);
 
@@ -586,6 +650,16 @@ export default function VirtualGrid({
   const highlightBox = highlightUnion
     ? getRangeBox(highlightUnion, rowVirtualizer.measurementsCache, colVirtualizer.measurementsCache)
     : null;
+
+  // className and style are merged rather than spread, so consumer attributes can
+  // never drop `sv-highlight-area` (the CSS hook and what getHighlightElement
+  // queries) or fight the measured geometry. aria-hidden is written before the
+  // spread so it stays overridable.
+  const {
+    className: highlightAreaClassName,
+    style: highlightAreaStyle,
+    ...highlightAreaRest
+  } = highlightAreaProps ?? {};
 
   // Same measured geometry for the copy indicator, which previously multiplied the
   // default COL_WIDTH/ROW_HEIGHT and so was misplaced on resized rows/columns.
@@ -602,16 +676,16 @@ export default function VirtualGrid({
       {/* Top-left corner */}
       <div
         className="sv-grid-corner"
-        style={{ width: ROW_HEADER_WIDTH, height: COL_HEADER_HEIGHT }}
+        style={{ width: rowHeaderWidth, height: colHeaderHeight }}
       />
 
       {/* Column headers */}
       <div
         className="sv-col-headers"
         style={{
-          left: ROW_HEADER_WIDTH,
-          width: `calc(100% - ${ROW_HEADER_WIDTH}px)`,
-          height: COL_HEADER_HEIGHT,
+          left: rowHeaderWidth,
+          width: `calc(100% - ${rowHeaderWidth}px)`,
+          height: colHeaderHeight,
         }}
       >
         <div
@@ -631,14 +705,16 @@ export default function VirtualGrid({
                 position: 'absolute',
                 left: vc.start,
                 width: vc.size,
-                height: COL_HEADER_HEIGHT,
+                height: colHeaderHeight,
                 top: 0,
               }}
             >
               {colIndexToLetter(vc.index)}
               <div
                 className="sv-col-resize-handle"
+                title="Drag to resize, double-click to fit to content"
                 onMouseDown={(e) => onColResizeStart(e, vc.index)}
+                onDoubleClick={(e) => onColAutoFit(e, vc.index)}
               />
             </div>
           ))}
@@ -649,9 +725,9 @@ export default function VirtualGrid({
       <div
         className="sv-row-headers"
         style={{
-          top: COL_HEADER_HEIGHT,
-          width: ROW_HEADER_WIDTH,
-          height: `calc(100% - ${COL_HEADER_HEIGHT}px)`,
+          top: colHeaderHeight,
+          width: rowHeaderWidth,
+          height: `calc(100% - ${colHeaderHeight}px)`,
         }}
       >
         <div
@@ -671,7 +747,7 @@ export default function VirtualGrid({
                 position: 'absolute',
                 top: vr.start,
                 height: vr.size,
-                width: ROW_HEADER_WIDTH,
+                width: rowHeaderWidth,
                 left: 0,
               }}
             >
@@ -691,8 +767,8 @@ export default function VirtualGrid({
         className="sv-grid-scroll"
         style={{
           position: 'absolute',
-          top: COL_HEADER_HEIGHT,
-          left: ROW_HEADER_WIDTH,
+          top: colHeaderHeight,
+          left: rowHeaderWidth,
           right: 0,
           bottom: 0,
           overflow: 'auto',
@@ -723,13 +799,23 @@ export default function VirtualGrid({
 
               const value = sheetData.data?.[row]?.[col] ?? '';
 
-              // Calculate cell dimensions (may span multiple cells if merged)
+              // Calculate cell dimensions (may span multiple cells if merged).
+              // Merged spans come from the measurement cache rather than from
+              // COL_WIDTH/ROW_HEIGHT multiples, so they track custom column
+              // widths and the current zoom instead of assuming default sizes.
               let cellWidth = vc.size;
               let cellHeight = vr.size;
               if (mergeInfo && mergeInfo.isTopLeft) {
                 const m = mergeInfo.merge;
-                cellWidth = (m.e.c - m.s.c + 1) * COL_WIDTH;
-                cellHeight = (m.e.r - m.s.r + 1) * ROW_HEIGHT;
+                const mergeBox = getRangeBox(
+                  { startRow: m.s.r, startCol: m.s.c, endRow: m.e.r, endCol: m.e.c },
+                  rowVirtualizer.measurementsCache,
+                  colVirtualizer.measurementsCache
+                );
+                if (mergeBox) {
+                  cellWidth = mergeBox.width;
+                  cellHeight = mergeBox.height;
+                }
               }
 
               // Check if this cell is being edited
@@ -830,9 +916,15 @@ export default function VirtualGrid({
           {highlightBox && (
             <div
               ref={highlightAreaRef}
-              className="sv-highlight-area"
               aria-hidden="true"
+              {...highlightAreaRest}
+              className={
+                highlightAreaClassName
+                  ? `sv-highlight-area ${highlightAreaClassName}`
+                  : 'sv-highlight-area'
+              }
               style={{
+                ...highlightAreaStyle,
                 top: highlightBox.top,
                 left: highlightBox.left,
                 width: highlightBox.width,
@@ -855,7 +947,8 @@ export default function VirtualGrid({
           />
         )}
 
-        {/* Chart overlays */}
+        {/* Chart overlays. Anchored in unzoomed grid coordinates, so the whole
+            layer is scaled rather than each overlay recomputing its own box. */}
         <div
           className="sv-chart-overlays-container"
           style={{
@@ -866,6 +959,8 @@ export default function VirtualGrid({
             height: rowVirtualizer.getTotalSize(),
             pointerEvents: 'none',
             overflow: 'visible',
+            transform: zoom === 1 ? undefined : `scale(${zoom})`,
+            transformOrigin: '0 0',
           }}
         >
           <ChartOverlays />
