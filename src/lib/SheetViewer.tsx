@@ -1,8 +1,10 @@
-import React, { useEffect, useMemo, useRef as useReactRef, forwardRef, useImperativeHandle, type Ref, type CSSProperties } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef as useReactRef, forwardRef, useImperativeHandle, type Ref, type CSSProperties } from 'react';
 import { ViewerProvider, useViewerStore, useViewerStoreApi } from './context/ViewerContext';
 import { useSourceLoader } from './hooks/useSourceLoader';
 import { useFileParser } from './hooks/useFileParser';
 import { parseRangeExpression } from './utils/rangeParser';
+import { DEFAULT_ZOOM } from './utils/zoom';
+import { computeAutoFitWidth, createCanvasTextMeasurer, resolveAutoFitFont } from './utils/autoFit';
 import VirtualGrid, { type VirtualGridApi } from './components/Grid/VirtualGrid';
 import Toolbar from './components/Toolbar';
 import FormulaBar from './components/FormulaBar';
@@ -10,7 +12,7 @@ import SheetTabs from './components/SheetTabs';
 import StatusBar from './components/StatusBar';
 import ChartPanel from './components/ChartPanel';
 import SearchBar from './components/SearchBar';
-import type { SheetViewerProps, SheetViewerHandle, SheetViewerMode, CellValue, CellComment, ParsedGridLineConfig } from './types';
+import type { SheetViewerProps, SheetViewerHandle, SheetViewerMode, SheetViewerLoadingState, CellValue, CellComment, ParsedGridLineConfig } from './types';
 import './styles/sheet-viewer.css';
 
 /**
@@ -46,7 +48,19 @@ function SheetViewerInner({
   highlightBorderColor,
   highlightable = true,
   highlightAreaRef,
+  highlightAreaProps,
   gridLines,
+  renderLoading,
+  tools,
+  toolsPlacement = 'left',
+  zoomable = true,
+  zoomPlacement = 'left',
+  zoom: controlledZoom,
+  defaultZoom,
+  zoomLevels,
+  minZoom,
+  maxZoom,
+  onZoomChange,
   showToolbar = true,
   showFileName = true,
   theme,
@@ -79,6 +93,9 @@ function SheetViewerInner({
   const setSelectionRanges = useViewerStore((s) => s.setSelectionRanges);
   const sheetData = useViewerStore((s) => (s.activeSheet ? s.sheets[s.activeSheet] : null));
   const setMode = useViewerStore((s) => s.setMode);
+  const currentZoom = useViewerStore((s) => s.zoom);
+  const setZoom = useViewerStore((s) => s.setZoom);
+  const setZoomConfig = useViewerStore((s) => s.setZoomConfig);
 
   // Flag to suppress onSelectionChange for silent setHighlight calls
   const suppressSelectionCb = useReactRef(false);
@@ -89,23 +106,26 @@ function SheetViewerInner({
   // VirtualGrid owns the scroll container; this is how the handle reaches it
   const gridApiRef = useReactRef<VirtualGridApi | null>(null);
 
-  const withOptionalSilentSelection = (
-    options: { silent?: boolean } | undefined,
-    callback: () => void
-  ) => {
-    if (options?.silent) suppressSelectionCb.current = true;
-    callback();
-    if (options?.silent) suppressSelectionCb.current = false;
-  };
+  const withOptionalSilentSelection = useCallback(
+    (options: { silent?: boolean } | undefined, callback: () => void) => {
+      if (options?.silent) suppressSelectionCb.current = true;
+      callback();
+      if (options?.silent) suppressSelectionCb.current = false;
+    },
+    []
+  );
 
-  const clearHighlightInStore = (options?: { silent?: boolean }) => {
-    const state = storeApi.getState();
-    if (!state.activeSheet) return;
-    withOptionalSilentSelection(options, () => {
-      state.setSelectionRanges(state.activeSheet!, [], '');
-      state.setActiveCell(null, null);
-    });
-  };
+  const clearHighlightInStore = useCallback(
+    (options?: { silent?: boolean }) => {
+      const state = storeApi.getState();
+      if (!state.activeSheet) return;
+      withOptionalSilentSelection(options, () => {
+        state.setSelectionRanges(state.activeSheet!, [], '');
+        state.setActiveCell(null, null);
+      });
+    },
+    [storeApi, withOptionalSilentSelection]
+  );
 
   // Parse gridLines prop into resolved CellRange configs
   const parsedGridLines = useMemo<ParsedGridLineConfig[]>(() => {
@@ -152,8 +172,10 @@ function SheetViewerInner({
     return vars as CSSProperties;
   }, [theme, searchMatchColor, searchActiveColor, highlightColor, highlightBorderColor]);
 
-  // Expose imperative handle via ref
-  useImperativeHandle(forwardedRef, () => ({
+  // The imperative API, built once and shared: `ref` exposes it to the consumer
+  // and registered tools receive the very same object in their context, so a
+  // tool can do exactly what the consumer can and nothing more.
+  const viewerApi = useMemo<SheetViewerHandle>(() => ({
     getSheetNames: () => storeApi.getState().sheetNames,
     getSheetData: (name?: string) => {
       const s = storeApi.getState();
@@ -241,10 +263,30 @@ function SheetViewerInner({
         s.setCellComment(key, r.startRow, r.startCol, comment);
       }
     },
+    getZoom: () => storeApi.getState().zoom,
+    setZoom: (value: number) => storeApi.getState().setZoom(value),
+    zoomIn: () => storeApi.getState().zoomIn(),
+    zoomOut: () => storeApi.getState().zoomOut(),
+    resetZoom: () => storeApi.getState().setZoom(DEFAULT_ZOOM),
     setColumnWidth: (colIndex: number, width: number, sheetName?: string) => {
       const s = storeApi.getState();
       const key = sheetName ?? s.activeSheet ?? '';
       if (key) s.setColumnWidth(key, colIndex, width);
+    },
+    autoFitColumn: (colIndex: number, sheetName?: string) => {
+      const s = storeApi.getState();
+      const key = sheetName ?? s.activeSheet ?? '';
+      const sheet = s.sheets[key];
+      if (!sheet || !key) return null;
+
+      const measure = createCanvasTextMeasurer();
+      if (!measure) return null;
+
+      const fitted = computeAutoFitWidth(colIndex, sheet, measure, {
+        font: resolveAutoFitFont(rootRef.current),
+      });
+      if (fitted !== null) s.setColumnWidth(key, colIndex, fitted);
+      return fitted;
     },
     setRowHeight: (rowIndex: number, height: number, sheetName?: string) => {
       const s = storeApi.getState();
@@ -273,12 +315,46 @@ function SheetViewerInner({
       }
       return result;
     },
-  }));
+  }), [storeApi, clearHighlightInStore, withOptionalSilentSelection]);
+
+  useImperativeHandle(forwardedRef, () => viewerApi, [viewerApi]);
 
   // Sync mode prop to store
   useEffect(() => {
     setMode(mode as SheetViewerMode);
   }, [mode, setMode]);
+
+  // Sync zoom bounds/levels. Runs before the zoom sync below so a `zoom` prop
+  // outside custom bounds is clamped against the bounds the consumer asked for.
+  useEffect(() => {
+    if (zoomLevels === undefined && minZoom === undefined && maxZoom === undefined) return;
+    setZoomConfig({ levels: zoomLevels, min: minZoom, max: maxZoom });
+  }, [zoomLevels, minZoom, maxZoom, setZoomConfig]);
+
+  // Apply defaultZoom once, on mount only — it is the starting point, not a
+  // value the viewer is held to.
+  const didApplyDefaultZoom = useReactRef(false);
+  useEffect(() => {
+    if (didApplyDefaultZoom.current || defaultZoom === undefined) return;
+    didApplyDefaultZoom.current = true;
+    if (controlledZoom === undefined) setZoom(defaultZoom);
+  }, [defaultZoom, controlledZoom, setZoom]);
+
+  // Sync the zoom prop. Only pushes on prop changes, so a user zoom from the
+  // control is not immediately undone by this effect re-running.
+  useEffect(() => {
+    if (controlledZoom === undefined) return;
+    setZoom(controlledZoom);
+  }, [controlledZoom, setZoom]);
+
+  // Report zoom changes, whatever moved them
+  useEffect(() => {
+    if (!onZoomChange) return;
+    const unsub = storeApi.subscribe((state, prevState) => {
+      if (state.zoom !== prevState.zoom) onZoomChange(state.zoom);
+    });
+    return unsub;
+  }, [onZoomChange, storeApi]);
 
   // Parse buffer when source is loaded
   useEffect(() => {
@@ -367,27 +443,43 @@ function SheetViewerInner({
   const isLoadingAny = sourceLoading || isParsing;
   const error = sourceError || parseError;
 
+  // Only built when a custom renderer is actually in play.
+  const loadingState: SheetViewerLoadingState = {
+    progress: parseProgress,
+    status: parseStatus,
+    // Prefer the name the source loader resolved: it is known as soon as the
+    // source is, whereas the store's is only set once parsing finishes.
+    fileName: fileName ?? storeFileName,
+    isFetching: sourceLoading && !isParsing,
+  };
+
   const containerStyle: CSSProperties = {
     width: typeof width === 'number' ? `${width}px` : width,
     height: typeof height === 'number' ? `${height}px` : height,
     ...themeStyle,
+    // Drives the calc() scaling of grid type and padding in the stylesheet.
+    ['--sv-zoom' as string]: String(currentZoom),
   };
 
   return (
     <div ref={rootRef} className={`sheet-viewer ${className}`.trim()} style={containerStyle}>
       {isLoadingAny && (
         <div className="sv-loading-overlay">
-          <div className="sv-loading-card">
-            <div className="sv-loading-spinner" />
-            <div className="sv-progress-bar-container">
-              <div
-                className="sv-progress-bar-fill"
-                style={{ width: `${parseProgress}%` }}
-              />
+          {renderLoading ? (
+            renderLoading(loadingState)
+          ) : (
+            <div className="sv-loading-card">
+              <div className="sv-loading-spinner" />
+              <div className="sv-progress-bar-container">
+                <div
+                  className="sv-progress-bar-fill"
+                  style={{ width: `${parseProgress}%` }}
+                />
+              </div>
+              <p className="sv-loading-status">{parseStatus || 'Loading...'}</p>
+              <p className="sv-loading-percent">{Math.round(parseProgress)}%</p>
             </div>
-            <p className="sv-loading-status">{parseStatus || 'Loading...'}</p>
-            <p className="sv-loading-percent">{Math.round(parseProgress)}%</p>
-          </div>
+          )}
         </div>
       )}
 
@@ -407,8 +499,16 @@ function SheetViewerInner({
 
       {hasData && (
         <>
-          {showToolbar && <Toolbar downloadable={downloadable} chartable={chartable} showFileName={showFileName} />}
-          <FormulaBar />
+          {showToolbar && (
+            <Toolbar downloadable={downloadable} chartable={chartable} showFileName={showFileName} />
+          )}
+          <FormulaBar
+            zoomable={zoomable}
+            zoomPlacement={zoomPlacement}
+            tools={tools}
+            toolsPlacement={toolsPlacement}
+            viewerApi={viewerApi}
+          />
           <div className="sv-main-content">
             <div className="sv-grid-wrapper">
               <VirtualGrid
@@ -416,6 +516,7 @@ function SheetViewerInner({
                 highlightColor={highlightColor}
                 highlightBorderColor={highlightBorderColor}
                 highlightAreaRef={highlightAreaRef}
+                highlightAreaProps={highlightAreaProps}
                 gridApiRef={gridApiRef}
                 parsedGridLines={parsedGridLines.length > 0 ? parsedGridLines : undefined}
                 tabNavigation={tabNavigation}

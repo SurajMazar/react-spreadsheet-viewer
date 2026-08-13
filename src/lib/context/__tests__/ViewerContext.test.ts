@@ -1,224 +1,12 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { createStore, type StoreApi } from 'zustand/vanilla';
-import type { ViewerState, SheetData, CellRange, CellStyle, CellComment, ChartOverlay, SheetViewerMode, CellValue, SelectionState, UndoEntry } from '../../types';
+import { type StoreApi } from 'zustand/vanilla';
+import { createViewerStore } from '../ViewerContext';
+import type { ViewerState, SheetData, CellRange } from '../../types';
 
 /**
- * Duplicate of createViewerStore (private in ViewerContext.tsx).
- * We recreate it here to unit-test store actions in isolation.
+ * Exercises the real store factory used by <SheetViewer />, so these tests
+ * cannot drift away from the implementation they cover.
  */
-
-const EMPTY_SELECTION: SelectionState = { ranges: [], rangeInput: '', scrollPos: null };
-
-function createViewerStore(): StoreApi<ViewerState> {
-  return createStore<ViewerState>((set, get) => ({
-    fileName: null,
-    sheetNames: [],
-    sheets: {},
-    images: {},
-    chartOverlays: {},
-    activeSheet: null,
-    isParsing: false,
-    parseProgress: 0,
-    parseStatus: '',
-    parseError: null,
-    selections: {},
-    activeCell: null,
-    showChartPanel: false,
-    chartType: 'bar',
-    isProgrammaticHighlight: false,
-    copiedRange: null,
-    searchMatches: [],
-    searchActiveIndex: 0,
-    undoStack: [],
-    redoStack: [],
-    mode: 'view' as SheetViewerMode,
-
-    setParseProgress: (progress: number, status?: string) =>
-      set({ parseProgress: progress, parseStatus: status || '' }),
-    startParsing: () =>
-      set({ isParsing: true, parseProgress: 0, parseStatus: 'Starting...', parseError: null }),
-    setParseError: (error: string) =>
-      set({ isParsing: false, parseError: error }),
-    setFileData: (payload: {
-      fileName: string;
-      sheetNames: string[];
-      sheets: Record<string, SheetData>;
-      images?: Record<string, unknown>;
-      chartOverlays?: Record<string, ChartOverlay[]>;
-    }) =>
-      set({
-        fileName: payload.fileName,
-        sheetNames: payload.sheetNames,
-        sheets: payload.sheets,
-        images: payload.images || {},
-        chartOverlays: payload.chartOverlays || {},
-        activeSheet: payload.sheetNames[0] || null,
-        isParsing: false,
-        parseProgress: 100,
-        parseStatus: 'Complete',
-        parseError: null,
-        selections: {},
-        activeCell: null,
-      }),
-    setActiveSheet: (sheetName: string) => set({ activeSheet: sheetName }),
-    setActiveCell: (row: number | null, col: number | null) =>
-      set({ activeCell: row !== null && row !== undefined && col !== null && col !== undefined ? { row, col } : null }),
-    setSelectionRanges: (sheetName: string, ranges: CellRange[], rangeInput?: string) => {
-      const state = get();
-      const prev = state.selections[sheetName] || EMPTY_SELECTION;
-      set({
-        selections: {
-          ...state.selections,
-          [sheetName]: { ...prev, ranges, rangeInput: rangeInput !== undefined ? rangeInput : prev.rangeInput },
-        },
-      });
-    },
-    setRangeInput: (sheetName: string, rangeInput: string) => {
-      const state = get();
-      const prev = state.selections[sheetName] || EMPTY_SELECTION;
-      set({ selections: { ...state.selections, [sheetName]: { ...prev, rangeInput } } });
-    },
-    setScrollPosition: (sheetName: string, scrollPos: { top: number; left: number }) => {
-      const state = get();
-      const prev = state.selections[sheetName] || EMPTY_SELECTION;
-      set({ selections: { ...state.selections, [sheetName]: { ...prev, scrollPos } } });
-    },
-    setCellValue: (sheetName: string, row: number, col: number, value: CellValue) => {
-      const state = get();
-      const sheet = state.sheets[sheetName];
-      if (!sheet) return;
-      const newData = sheet.data.map((r) => [...r]);
-      while (newData.length <= row) newData.push([]);
-      const targetRow = [...newData[row]];
-      while (targetRow.length <= col) targetRow.push(null);
-      targetRow[col] = value;
-      newData[row] = targetRow;
-      const newRows = Math.max(sheet.rows, row + 1);
-      const newCols = Math.max(sheet.cols, col + 1);
-      set({ sheets: { ...state.sheets, [sheetName]: { ...sheet, data: newData, rows: newRows, cols: newCols } } });
-    },
-    toggleChartPanel: () => set((s) => ({ showChartPanel: !s.showChartPanel })),
-    setChartType: (chartType: string) => set({ chartType }),
-    setCopiedRange: (range: CellRange | null) => set({ copiedRange: range }),
-    setProgrammaticHighlight: (value: boolean) => set({ isProgrammaticHighlight: value }),
-    setSearchMatches: (matches: { row: number; col: number }[]) =>
-      set({ searchMatches: matches, searchActiveIndex: 0 }),
-    setSearchActiveIndex: (index: number) => set({ searchActiveIndex: index }),
-    setColumnWidth: (sheetName: string, colIndex: number, width: number) => {
-      const state = get();
-      const sheet = state.sheets[sheetName];
-      if (!sheet) return;
-      const newWidths = [...(sheet.colWidths || [])];
-      while (newWidths.length <= colIndex) newWidths.push(100);
-      newWidths[colIndex] = Math.max(30, width);
-      set({ sheets: { ...state.sheets, [sheetName]: { ...sheet, colWidths: newWidths } } });
-    },
-    setRowHeight: (sheetName: string, rowIndex: number, height: number) => {
-      const state = get();
-      const sheet = state.sheets[sheetName];
-      if (!sheet) return;
-      const newHeights = [...(sheet.rowHeights || [])];
-      while (newHeights.length <= rowIndex) newHeights.push(26);
-      newHeights[rowIndex] = Math.max(20, height);
-      set({ sheets: { ...state.sheets, [sheetName]: { ...sheet, rowHeights: newHeights } } });
-    },
-    setCellComment: (sheetName: string, row: number, col: number, comment: CellComment | null) => {
-      const state = get();
-      const sheet = state.sheets[sheetName];
-      if (!sheet) return;
-      const key = `${row},${col}`;
-      const prev = sheet.comments || {};
-      let newComments: Record<string, CellComment>;
-      if (comment === null) {
-        const { [key]: _removed, ...rest } = prev;
-        newComments = rest;
-      } else {
-        newComments = { ...prev, [key]: comment };
-      }
-      set({ sheets: { ...state.sheets, [sheetName]: { ...sheet, comments: newComments } } });
-    },
-    setCellStyle: (sheetName: string, row: number, col: number, style: CellStyle | null) => {
-      const state = get();
-      const sheet = state.sheets[sheetName];
-      if (!sheet) return;
-      const key = `${row},${col}`;
-      const prevStyles = sheet.styles || {};
-      let newStyles: Record<string, CellStyle>;
-      if (style === null) {
-        const { [key]: _removed, ...rest } = prevStyles;
-        newStyles = rest;
-      } else {
-        newStyles = { ...prevStyles, [key]: { ...(prevStyles[key] || {}), ...style } };
-      }
-      set({ sheets: { ...state.sheets, [sheetName]: { ...sheet, styles: newStyles } } });
-    },
-    setMode: (mode: SheetViewerMode) => set({ mode }),
-    getCurrentSheetData: (): SheetData | null => {
-      const state = get();
-      if (!state.activeSheet || !state.sheets[state.activeSheet]) return null;
-      return state.sheets[state.activeSheet];
-    },
-    pushUndo: (entry: UndoEntry) => {
-      const state = get();
-      const newStack = [...state.undoStack, entry];
-      if (newStack.length > 100) newStack.shift();
-      set({ undoStack: newStack, redoStack: [] });
-    },
-    undo: () => {
-      const state = get();
-      if (state.undoStack.length === 0) return;
-      const entry = state.undoStack[state.undoStack.length - 1];
-      const sheet = state.sheets[entry.sheetName];
-      if (!sheet) return;
-      const newData = sheet.data.map((r) => [...r]);
-      for (const ch of entry.cellChanges) {
-        while (newData.length <= ch.row) newData.push([]);
-        while (newData[ch.row].length <= ch.col) newData[ch.row].push(null);
-        newData[ch.row][ch.col] = ch.oldValue;
-      }
-      const newStyles = { ...(sheet.styles || {}) };
-      for (const ch of entry.styleChanges) {
-        const key = `${ch.row},${ch.col}`;
-        if (ch.oldStyle === undefined) { delete newStyles[key]; } else { newStyles[key] = ch.oldStyle; }
-      }
-      set({
-        undoStack: state.undoStack.slice(0, -1),
-        redoStack: [...state.redoStack, entry],
-        sheets: { ...state.sheets, [entry.sheetName]: { ...sheet, data: newData, styles: newStyles } },
-      });
-    },
-    redo: () => {
-      const state = get();
-      if (state.redoStack.length === 0) return;
-      const entry = state.redoStack[state.redoStack.length - 1];
-      const sheet = state.sheets[entry.sheetName];
-      if (!sheet) return;
-      const newData = sheet.data.map((r) => [...r]);
-      for (const ch of entry.cellChanges) {
-        while (newData.length <= ch.row) newData.push([]);
-        while (newData[ch.row].length <= ch.col) newData[ch.row].push(null);
-        newData[ch.row][ch.col] = ch.newValue;
-      }
-      const newStyles = { ...(sheet.styles || {}) };
-      for (const ch of entry.styleChanges) {
-        const key = `${ch.row},${ch.col}`;
-        if (ch.newStyle === undefined) { delete newStyles[key]; } else { newStyles[key] = ch.newStyle; }
-      }
-      set({
-        redoStack: state.redoStack.slice(0, -1),
-        undoStack: [...state.undoStack, entry],
-        sheets: { ...state.sheets, [entry.sheetName]: { ...sheet, data: newData, styles: newStyles } },
-      });
-    },
-    reset: () =>
-      set({
-        fileName: null, sheetNames: [], sheets: {}, images: {}, chartOverlays: {},
-        activeSheet: null, isParsing: false, parseProgress: 0, parseStatus: '', parseError: null,
-        selections: {}, activeCell: null, showChartPanel: false, isProgrammaticHighlight: false, copiedRange: null,
-        undoStack: [], redoStack: [],
-      }),
-  }));
-}
 
 const mockSheet: SheetData = {
   data: [
@@ -632,6 +420,93 @@ describe('ViewerStore — reset', () => {
     expect(s.showChartPanel).toBe(false);
     expect(s.copiedRange).toBeNull();
     expect(s.selections).toEqual({});
+  });
+});
+
+// =============================================
+// Zoom
+// =============================================
+describe('ViewerStore — Zoom', () => {
+  it('starts at 100% with the default levels and bounds', () => {
+    const s = store.getState();
+    expect(s.zoom).toBe(1);
+    expect(s.minZoom).toBe(0.25);
+    expect(s.maxZoom).toBe(4);
+    expect(s.zoomLevels).toEqual([0.5, 0.75, 0.9, 1, 1.25, 1.5, 2]);
+  });
+
+  it('setZoom clamps to the current bounds', () => {
+    store.getState().setZoom(0.75);
+    expect(store.getState().zoom).toBe(0.75);
+
+    store.getState().setZoom(99);
+    expect(store.getState().zoom).toBe(4);
+
+    store.getState().setZoom(0.001);
+    expect(store.getState().zoom).toBe(0.25);
+  });
+
+  it('zoomIn / zoomOut walk the level list', () => {
+    store.getState().zoomIn();
+    expect(store.getState().zoom).toBe(1.25);
+
+    store.getState().zoomOut();
+    expect(store.getState().zoom).toBe(1);
+
+    store.getState().zoomOut();
+    expect(store.getState().zoom).toBe(0.9);
+  });
+
+  it('zoomIn at the ceiling is a no-op', () => {
+    store.getState().setZoom(4);
+    store.getState().zoomIn();
+    expect(store.getState().zoom).toBe(4);
+  });
+
+  it('stepping stays within the levels the picker offers', () => {
+    // 200% is the top of the default list; zoomIn must not run on to maxZoom.
+    store.getState().setZoom(2);
+    store.getState().zoomIn();
+    expect(store.getState().zoom).toBe(2);
+
+    store.getState().setZoom(0.5);
+    store.getState().zoomOut();
+    expect(store.getState().zoom).toBe(0.5);
+  });
+
+  it('setZoomConfig re-clamps a zoom left outside the new bounds', () => {
+    store.getState().setZoom(2);
+    store.getState().setZoomConfig({ min: 0.5, max: 1.5 });
+
+    const s = store.getState();
+    expect(s.zoom).toBe(1.5);
+    expect(s.minZoom).toBe(0.5);
+    expect(s.maxZoom).toBe(1.5);
+  });
+
+  it('setZoomConfig leaves unspecified settings untouched', () => {
+    store.getState().setZoomConfig({ levels: [1, 2] });
+
+    const s = store.getState();
+    expect(s.zoomLevels).toEqual([1, 2]);
+    expect(s.minZoom).toBe(0.25);
+    expect(s.maxZoom).toBe(4);
+  });
+
+  it('setZoomConfig ignores a re-set of identical config', () => {
+    store.getState().setZoomConfig({ levels: [1, 2], min: 0.5, max: 2 });
+    const after = store.getState();
+
+    // A fresh array with the same values, as an inline prop would be.
+    store.getState().setZoomConfig({ levels: [1, 2], min: 0.5, max: 2 });
+
+    expect(store.getState().zoomLevels).toBe(after.zoomLevels);
+  });
+
+  it('steps through a custom level list', () => {
+    store.getState().setZoomConfig({ levels: [1, 3] });
+    store.getState().zoomIn();
+    expect(store.getState().zoom).toBe(3);
   });
 });
 

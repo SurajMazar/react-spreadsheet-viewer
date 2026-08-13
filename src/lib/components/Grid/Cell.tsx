@@ -95,7 +95,9 @@ const Cell = memo(function Cell({
     if (cellStyle.fontColor) mergedStyle.color = cellStyle.fontColor;
     if (cellStyle.bold) mergedStyle.fontWeight = 700;
     if (cellStyle.italic) mergedStyle.fontStyle = 'italic';
-    if (cellStyle.fontSize) mergedStyle.fontSize = `${cellStyle.fontSize}pt`;
+    // Scaled by the zoom variable so a cell carrying an explicit Excel font size
+    // zooms with the rest of the grid instead of staying pinned at 100%.
+    if (cellStyle.fontSize) mergedStyle.fontSize = `calc(${cellStyle.fontSize}pt * var(--sv-zoom))`;
     if (cellStyle.textAlign) mergedStyle.textAlign = cellStyle.textAlign;
   }
 

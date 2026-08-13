@@ -31,6 +31,11 @@ A high-performance React component for viewing and editing Excel and CSV files w
 - **Charts from selection** — select a data range and create bar, line, pie, or area charts dynamically
 - **Copy & paste with formatting** — Ctrl+C/V with both HTML (preserving styles) and TSV clipboard formats
 - **Undo/redo** — Ctrl+Z and Ctrl+Y (or Ctrl+Shift+Z) for cell edits and paste
+- **Zoom** — Google Sheets-style zoom control in the formula bar, Ctrl/Cmd + scroll over the grid, or the `zoom` prop and ref API
+- **Excel column widths** — column widths set in the original workbook are preserved on render
+- **Auto-fit columns** — double-click a column header's edge to size it to its widest content
+- **Extensible tools** — register your own tools through the `tools` prop; they render at either end of the formula bar and the viewer knows nothing about what they do
+- **Custom loading UI** — replace the built-in parsing card via `renderLoading`, with live progress and status
 - **Column/row resize** — drag column and row header edges to resize
 - **Merged cells** — visually renders merged cell ranges from Excel files
 - **Text wrapping** — cells with `wrapText` style render multi-line content
@@ -117,7 +122,19 @@ The `source` prop accepts multiple formats:
 | `highlightBorderColor` | `string` | — | Custom border color for the highlighted range (e.g. `"#ff0000"`) |
 | `highlightable` | `boolean` | `true` | When `false`, all selection/highlight visuals are suppressed |
 | `highlightAreaRef` | `Ref<HTMLDivElement>` | — | Receives one DOM element spanning the entire highlighted area; `null` when no highlight. See [Anchoring UI to the highlighted area](#anchoring-ui-to-the-highlighted-area) |
+| `highlightAreaProps` | `HighlightAreaAttributes` | — | Extra HTML attributes (`id`, `data-*`, `style`, handlers…) for that element. `className` is appended to `sv-highlight-area`; geometry always wins over `style` |
 | `gridLines` | `GridLineConfig[]` | — | Draw visible cell borders on specific ranges (like Excel's All Borders) |
+| `tools` | `SheetViewerTool[]` | — | Tools to register in the formula bar's Tools section. See [Tools](#tools) |
+| `toolsPlacement` | `'left' \| 'right'` | `'left'` | Which end of the formula bar row the tools sit at. A tool's own `placement` overrides this |
+| `renderLoading` | `(state: SheetViewerLoadingState) => ReactNode` | — | Replace the built-in loading UI. See [Custom loading UI](#custom-loading-ui) |
+| `zoomable` | `boolean` | `true` | Show the zoom control in the formula bar |
+| `zoomPlacement` | `'left' \| 'right'` | `'left'` | Which end of the formula bar row the zoom control sits at |
+| `zoom` | `number` | — | Zoom factor (`1` = 100%). The user can still zoom afterwards; changes report via `onZoomChange` |
+| `defaultZoom` | `number` | `1` | Zoom factor to start at when `zoom` is not supplied |
+| `zoomLevels` | `number[]` | `[0.5, 0.75, 0.9, 1, 1.25, 1.5, 2]` | Levels offered by the zoom control |
+| `minZoom` | `number` | `0.25` | Lowest zoom the viewer will go to |
+| `maxZoom` | `number` | `4` | Highest zoom the viewer will go to |
+| `onZoomChange` | `(zoom: number) => void` | — | Called whenever the zoom factor changes |
 | `showToolbar` | `boolean` | `true` | Show or hide the entire toolbar row |
 | `showFileName` | `boolean` | `true` | Show or hide only the filename/logo in the toolbar. Charts & Download remain visible |
 | `theme` | `SheetViewerTheme` | — | Override the entire color palette of the library |
@@ -213,7 +230,13 @@ function App() {
 | `getHighlightElement()` | `HTMLElement \| null` | The single element spanning the highlighted area (same one `highlightAreaRef` receives) |
 | `scrollToSelection()` | `boolean` | Scroll so the whole selection is visible; `false` if nothing is selected |
 | `setColumnWidth(col, width, name?)` | `void` | Set column width in pixels (min 30px) |
+| `autoFitColumn(col, name?)` | `number \| null` | Size a column to its widest content. Returns the applied width, or `null` for an empty column |
 | `setRowHeight(row, height, name?)` | `void` | Set row height in pixels (min 20px) |
+| `getZoom()` | `number` | Current zoom factor (`1` = 100%) |
+| `setZoom(zoom)` | `void` | Set the zoom factor, clamped to `minZoom`/`maxZoom` |
+| `zoomIn()` | `void` | Step up to the next zoom level |
+| `zoomOut()` | `void` | Step down to the previous zoom level |
+| `resetZoom()` | `void` | Return to 100% |
 | `getCellComment(cellRef, name?)` | `CellComment \| null` | Get comment for a cell |
 | `setCellComment(cellRef, text, author?, name?)` | `void` | Set or remove a cell comment |
 | `undo()` | `void` | Undo the last cell edit or paste |
@@ -462,6 +485,29 @@ The grid is virtualized, so the highlighted **cells** are not all in the DOM —
 
 `ref.current?.getHighlightElement()` returns the same element if you already hold a `SheetViewerHandle` and would rather not pass a second ref.
 
+### Attributes on the highlight area
+
+`highlightAreaProps` puts arbitrary HTML attributes on that same element — an `id` for a popover library to resolve as its anchor, a test id, ARIA wiring, or your own styling:
+
+```tsx
+<SheetViewer
+  source={file}
+  highlightAreaProps={{
+    id: 'selection-anchor',
+    'data-testid': 'highlight-box',
+    style: { pointerEvents: 'auto', outline: '2px dashed #e53935' },
+    onClick: () => console.log('highlight clicked'),
+  }}
+/>
+```
+
+Two merge rules keep the element working:
+
+- **`className` is appended** to `sv-highlight-area`, never replaces it — the class carries the CSS and is what `getHighlightElement()` queries.
+- **The measured geometry wins** over `style`. `top`/`left`/`width`/`height` are always the computed box; everything else in `style` is applied as given.
+
+`aria-hidden="true"` is the default and can be overridden. The element is `pointer-events: none` by default — set `pointerEvents: 'auto'` if you want it clickable (note that this makes it swallow drag-selection over the highlighted cells).
+
 ### Scrolling the selection into view
 
 `ref.current?.scrollToSelection()` scrolls so the **entire** selection is visible:
@@ -528,16 +574,173 @@ if (ref.current?.canRedo()) ref.current.redo();
 
 ---
 
+## Zoom
+
+A Google Sheets-style zoom picker sits at the start of the formula bar row. Users can also hold Ctrl/Cmd and scroll over the grid. Because it lives in the formula bar rather than the toolbar, `showToolbar={false}` does not hide it.
+
+Zoom scales the grid's real geometry — column widths, row heights, headers and type — rather than CSS-transforming it, so selection, scrolling, overlays and hit testing stay exact at every level.
+
+```tsx
+<SheetViewer
+  source={file}
+  defaultZoom={0.75}
+  zoomLevels={[0.5, 1, 1.5, 2]}
+  minZoom={0.5}
+  maxZoom={2}
+  onZoomChange={(zoom) => console.log(`${zoom * 100}%`)}
+/>
+```
+
+Programmatic control:
+
+```tsx
+ref.current?.zoomIn();
+ref.current?.zoomOut();
+ref.current?.setZoom(1.5);
+ref.current?.resetZoom();
+ref.current?.getZoom();   // 1
+```
+
+`zoomIn`/`zoomOut` walk the `zoomLevels` ladder and stop at its ends — at 200% (the top level) `zoomIn` is a no-op rather than jumping to `maxZoom`. `minZoom`/`maxZoom` are the limits for `setZoom`, not extra rungs, so stepping never lands on a level the picker does not offer.
+
+Hide the control entirely with `zoomable={false}` — the `zoom` prop and ref API still work.
+
+---
+
 ## Column & Row Resizing
 
 Drag the right edge of column headers or the bottom edge of row headers to resize. Minimum column: 30px, minimum row: 20px.
+
+**Excel column widths are preserved.** Columns explicitly sized in the source workbook render at that width; columns the author never touched fall back to the viewer's default of 100px.
+
+**Auto-fit:** double-click a column header's right edge to size that column to its widest content, the same gesture as Excel and Google Sheets. Results are clamped to 30–500px so one long cell cannot push everything else off-screen, and very tall sheets are fitted from their leading rows to keep the gesture instant.
 
 Programmatic control:
 
 ```tsx
 ref.current?.setColumnWidth(0, 200);  // Column A → 200px
 ref.current?.setRowHeight(0, 50);     // Row 1 → 50px
+ref.current?.autoFitColumn(0);        // Column A → fits its content
 ```
+
+---
+
+## Tools
+
+The formula bar row hosts a Tools section that renders whatever you register through the `tools` prop, alongside the zoom control. The viewer never knows what a tool does, so new functionality is added from the outside — no changes to the component itself. Tools stay visible when `showToolbar={false}`.
+
+Use `toolsPlacement` to put them at either end of the row, and `zoomPlacement` for the zoom control — the two are independent, so they can sit at opposite ends. An individual tool can opt out with its own `placement`:
+
+```tsx
+<SheetViewer
+  tools={[copyStats, exportTool, { ...sheetInfo, placement: 'right' }]}
+  toolsPlacement="left"    // copyStats + exportTool go left…
+  zoomPlacement="right"    // …zoom goes right, and sheetInfo joins it
+/>
+```
+
+A tool with no configuration is a plain object:
+
+```tsx
+import { SheetViewer } from 'rc-sheet-viewer-17';
+import type { SheetViewerTool } from 'rc-sheet-viewer-17';
+
+const copyStats: SheetViewerTool = {
+  id: 'copy-stats',
+  label: 'Copy stats',
+  icon: StatsIcon,                          // component, or a ready-made element
+  isDisabled: (ctx) => ctx.selection.length === 0,
+  onClick: (ctx) => {
+    const rows = ctx.viewer.getSelectedRangeData();
+    navigator.clipboard.writeText(JSON.stringify(rows));
+  },
+};
+
+<SheetViewer source={file} tools={[copyStats]} />
+```
+
+Tools that carry their own settings use `defineSheetViewerTool`, which infers the config type and type-checks every callback against it before binding it in:
+
+```tsx
+import { defineSheetViewerTool } from 'rc-sheet-viewer-17';
+
+const exportTool = defineSheetViewerTool({
+  id: 'export-selection',
+  label: 'Export selection',
+  icon: DownloadIcon,
+  config: { format: 'csv' as const, endpoint: '/api/export' },
+  onClick: (ctx, config) => {
+    // config is fully typed here — a typo is a compile error
+    fetch(config.endpoint, {
+      method: 'POST',
+      body: JSON.stringify({ format: config.format, rows: ctx.viewer.getSelectedRangeData() }),
+    });
+  },
+});
+```
+
+That binding is what keeps `tools` a single concrete `SheetViewerTool[]` — no `any`, no union to widen — while each tool's own options stay checked where the tool is written.
+
+### Tool fields
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | `string` | Stable identifier, unique within the array |
+| `label` | `string` | Tooltip and accessible name |
+| `icon` | `ComponentType<{ size: number }> \| ReactElement` | Icon component (rendered at 16px) or a ready-made element |
+| `onClick` | `(ctx: SheetViewerToolClickContext) => void` | Runs when the user activates the tool |
+| `showLabel` | `boolean` | Render the label beside the icon. Default: `false` |
+| `placement` | `'left' \| 'right'` | Pin this tool to one end, overriding the viewer's `toolsPlacement` |
+| `isDisabled` | `(ctx: SheetViewerToolContext) => boolean` | Grey the tool out; re-evaluated as viewer state changes |
+| `isActive` | `(ctx: SheetViewerToolContext) => boolean` | Render the tool pressed |
+
+`defineSheetViewerTool` takes the same fields plus `config`, and passes it as a second argument to `onClick`, `isDisabled` and `isActive`.
+
+### Tool context
+
+Every callback receives a snapshot of the viewer:
+
+| Field | Type | Description |
+|---|---|---|
+| `viewer` | `SheetViewerHandle` | The same imperative API the `ref` exposes |
+| `fileName` | `string \| null` | Loaded file name |
+| `sheetNames` | `string[]` | Every sheet in the workbook |
+| `activeSheet` | `string \| null` | Sheet currently on screen |
+| `sheetData` | `SheetData \| null` | Data for the active sheet |
+| `selection` | `CellRange[]` | Selected ranges — empty when nothing is selected |
+| `activeCell` | `ActiveCell \| null` | Anchor cell of the selection |
+| `zoom` | `number` | Current zoom factor |
+| `mode` | `'view' \| 'edit'` | Current viewer mode |
+
+`onClick` also gets `element`, the tool's own button, for anchoring a popover or menu to it.
+
+---
+
+## Custom loading UI
+
+`renderLoading` replaces the built-in card shown while the file is fetched and parsed. Your node renders inside the viewer's own full-bleed overlay, so you only describe the content — positioning and stacking are handled.
+
+```tsx
+<SheetViewer
+  source={file}
+  renderLoading={({ progress, status, fileName, isFetching }) => (
+    <MyLoader
+      title={fileName ?? 'Reading file…'}
+      label={isFetching ? 'Downloading' : status}
+      value={progress}
+    />
+  )}
+/>
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `progress` | `number` | Overall progress, 0–100 |
+| `status` | `string` | Current step, e.g. `"Parsing workbook..."`. Empty while fetching |
+| `fileName` | `string \| null` | Name of the file being loaded, once known |
+| `isFetching` | `boolean` | True while the source is still being fetched or read, before parsing starts |
+
+Return `null` to show nothing at all. Omit the prop to keep the default card.
 
 ---
 
@@ -610,6 +813,14 @@ import type {
   SheetViewerSource,
   SheetViewerMode,
   SheetViewerTheme,
+  SheetViewerTool,
+  SheetViewerToolDefinition,
+  SheetViewerToolContext,
+  SheetViewerToolClickContext,
+  SheetViewerToolIcon,
+  SheetViewerToolIconProps,
+  SheetViewerToolsPlacement,
+  SheetViewerLoadingState,
   SheetData,
   CellRange,
   CellValue,

@@ -1,5 +1,6 @@
 import { useCallback, useRef } from 'react';
 import { useViewerStore } from '../context/ViewerContext';
+import { buildColWidths, type ColInfo } from '../utils/columnWidths';
 import type { SheetData, CellValue } from '../types';
 
 /**
@@ -75,11 +76,14 @@ async function parseExcelBuffer(
   setParseProgress(25, 'Parsing workbook...');
   await nextFrame();
 
+  // cellStyles is what makes SheetJS parse `<cols>` into `!cols`; without it the
+  // column widths the author set in Excel are dropped on the floor.
   const workbook = XLSX.read(buffer, {
     type: 'array',
     cellDates: true,
     cellNF: true,
     sheetStubs: true,
+    cellStyles: true,
   });
 
   setParseProgress(45, 'Processing sheets...');
@@ -145,9 +149,7 @@ async function parseExcelBuffer(
       e: { r: m.e.r, c: m.e.c },
     }));
 
-    const colWidths = ((worksheet['!cols'] || []) as Array<{ wpx?: number; wch?: number } | null>).map((c) =>
-      c ? c.wpx || (c.wch ? c.wch * 8 : 100) : 100
-    );
+    const colWidths = buildColWidths(worksheet['!cols'] as ColInfo[] | undefined);
 
     sheets[name] = { data, cols, rows, merges, colWidths };
 

@@ -1,7 +1,28 @@
 export { default as SheetViewer } from './SheetViewer';
+export { defineSheetViewerTool } from './tools/defineTool';
+export {
+  ZOOM_LEVELS,
+  MIN_ZOOM,
+  MAX_ZOOM,
+  DEFAULT_ZOOM,
+} from './utils/zoom';
+export {
+  AUTO_FIT_MIN_WIDTH,
+  AUTO_FIT_MAX_WIDTH,
+} from './utils/autoFit';
+export type {
+  SheetViewerTool,
+  SheetViewerToolDefinition,
+  SheetViewerToolContext,
+  SheetViewerToolClickContext,
+  SheetViewerToolIcon,
+  SheetViewerToolIconProps,
+} from './types';
 export type {
   SheetViewerProps,
   SheetViewerHandle,
+  SheetViewerLoadingState,
+  SheetViewerToolsPlacement,
   SheetViewerSource,
   SheetViewerMode,
   SheetData,
@@ -20,6 +41,7 @@ export type {
   ValidationRule,
   ValidationRuleType,
   GridLineConfig,
+  HighlightAreaAttributes,
   GridLineBorderStyle,
   ParsedGridLineConfig,
   SheetViewerTheme,

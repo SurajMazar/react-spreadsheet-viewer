@@ -24,6 +24,11 @@
   --sv-search-match-color: rgba(255, 213, 79, 0.35);
   --sv-search-active-color: rgba(255, 152, 0, 0.55);
 
+  /* Grid zoom factor. Set by SheetViewer; scales grid type and padding to match
+     the zoomed cell geometry the virtualizer lays out. Chrome outside the grid
+     (toolbar, tabs, status bar) deliberately keeps its own size. */
+  --sv-zoom: 1;
+
   --sv-toolbar-height: 44px;
   --sv-formula-bar-height: 32px;
   --sv-sheet-tabs-height: 36px;
@@ -247,6 +252,148 @@
   border-radius: var(--sv-radius-sm);
 }
 
+/* Toolbar separator between built-in controls and registered tools */
+.sv-toolbar-divider {
+  width: 1px;
+  height: 20px;
+  background: var(--sv-color-border);
+  flex-shrink: 0;
+}
+
+/* Tools section: consumer-registered tools render here */
+.sv-toolbar-tools {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.sv-tool-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.sv-tool-btn:disabled:hover {
+  background: transparent;
+  color: var(--sv-color-text-secondary);
+}
+
+.sv-tool-icon {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+/* Zoom control */
+.sv-zoom-control {
+  position: relative;
+  flex-shrink: 0;
+}
+
+/* Trigger reads as a combobox, like the zoom picker in Google Sheets: quiet
+   until hovered, then a 2px primary border while its menu is open. The border
+   is always present but transparent, so opening it shifts nothing. */
+.sv-zoom-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 76px;
+  padding: 4px 8px;
+  border: 2px solid transparent;
+  background: transparent;
+  color: var(--sv-color-text);
+  font-size: var(--sv-font-size-sm);
+  font-family: var(--sv-font-family);
+  border-radius: var(--sv-radius-sm);
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.sv-zoom-trigger:hover {
+  background: var(--sv-color-hover);
+}
+
+.sv-zoom-trigger.active,
+.sv-zoom-trigger.active:hover {
+  border-color: var(--sv-color-primary);
+  background: var(--sv-color-bg);
+}
+
+.sv-zoom-value {
+  font-variant-numeric: tabular-nums;
+  padding: 0 2px;
+  border-radius: 2px;
+}
+
+/* The open combobox shows its value as if selected, matching Google Sheets */
+.sv-zoom-trigger.active .sv-zoom-value {
+  background: var(--sv-color-primary-light);
+}
+
+.sv-zoom-caret {
+  color: var(--sv-color-text-secondary);
+  transition: transform 0.15s ease;
+}
+
+.sv-zoom-caret.open {
+  transform: rotate(180deg);
+}
+
+.sv-zoom-trigger.active .sv-zoom-caret {
+  color: var(--sv-color-primary);
+}
+
+/* Menu: borderless card on a soft Material elevation, roomy rows */
+/* Anchored to the edge the control sits on, so it never opens off-screen */
+.sv-zoom-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  padding: 8px 0;
+  background: var(--sv-color-bg);
+  border: none;
+  border-radius: var(--sv-radius-md);
+  box-shadow:
+    0 1px 2px rgba(60, 64, 67, 0.3),
+    0 2px 6px 2px rgba(60, 64, 67, 0.15);
+  z-index: 200;
+  min-width: 128px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.sv-zoom-menu-left {
+  left: 0;
+}
+
+.sv-zoom-menu-right {
+  right: 0;
+}
+
+.sv-zoom-menu-item {
+  display: block;
+  width: 100%;
+  padding: 10px 24px;
+  border: none;
+  background: transparent;
+  color: var(--sv-color-text);
+  font-size: var(--sv-font-size-md);
+  font-family: var(--sv-font-family);
+  font-variant-numeric: tabular-nums;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.sv-zoom-menu-item:hover {
+  background: var(--sv-color-hover);
+}
+
+.sv-zoom-menu-item.active {
+  background: var(--sv-color-primary-bg);
+  color: var(--sv-color-primary);
+  font-weight: 500;
+}
+
 .sv-download-menu {
   position: absolute;
   top: 100%;
@@ -357,6 +504,37 @@
   padding: 4px;
 }
 
+/* Tools + zoom. One group per end of the row; the divider always faces the
+   formula bar's own controls, whichever end the group is at. */
+.sv-formula-bar-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 100%;
+  padding: 0 6px;
+  flex-shrink: 0;
+}
+
+.sv-formula-bar-actions-left {
+  border-right: 1px solid var(--sv-color-border-light);
+}
+
+.sv-formula-bar-actions-right {
+  border-left: 1px solid var(--sv-color-border-light);
+}
+
+/* The bar is only 32px tall, so the buttons it hosts run tighter than the
+   toolbar's. Kept as a descendant override rather than a second set of
+   classes, so tools and the zoom control render identically wherever placed. */
+.sv-formula-bar-actions .sv-toolbar-btn {
+  padding: 4px 6px;
+}
+
+.sv-formula-bar-actions .sv-zoom-trigger {
+  padding: 2px 6px;
+  min-width: 70px;
+}
+
 /* ========================================
    Grid
    ======================================== */
@@ -397,7 +575,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: var(--sv-font-size-sm);
+  font-size: calc(var(--sv-font-size-sm) * var(--sv-zoom));
   font-weight: 500;
   color: var(--sv-color-header-text);
   border-right: 1px solid var(--sv-color-border-light);
@@ -424,7 +602,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: var(--sv-font-size-sm);
+  font-size: calc(var(--sv-font-size-sm) * var(--sv-zoom));
   color: var(--sv-color-header-text);
   border-bottom: 1px solid var(--sv-color-border-light);
   user-select: none;
@@ -529,13 +707,13 @@
 .sv-cell {
   display: flex;
   align-items: center;
-  padding: 0 6px;
+  padding: 0 calc(6px * var(--sv-zoom));
   border-right: 1px solid var(--sv-color-border-light);
   border-bottom: 1px solid var(--sv-color-border-light);
   cursor: cell;
   overflow: hidden;
   white-space: nowrap;
-  font-size: var(--sv-font-size-base);
+  font-size: calc(var(--sv-font-size-base) * var(--sv-zoom));
   user-select: none;
   background: var(--sv-color-bg);
 }
@@ -578,7 +756,7 @@
   overflow: visible;
   text-overflow: clip;
   background: var(--sv-color-bg);
-  padding-right: 6px;
+  padding-right: calc(6px * var(--sv-zoom));
 }
 
 /* Active cell inside a range: expand text with opaque bg (highlight tint over solid base) */
@@ -589,7 +767,7 @@
   background:
     linear-gradient(var(--sv-highlight-color, var(--sv-color-selection)), var(--sv-highlight-color, var(--sv-color-selection))),
     var(--sv-color-bg);
-  padding-right: 6px;
+  padding-right: calc(6px * var(--sv-zoom));
 }
 
 .sv-cell-text-wrap {
@@ -680,8 +858,8 @@
   height: 100%;
   border: 2px solid var(--sv-color-primary);
   outline: none;
-  padding: 0 5px;
-  font-size: var(--sv-font-size-base);
+  padding: 0 calc(5px * var(--sv-zoom));
+  font-size: calc(var(--sv-font-size-base) * var(--sv-zoom));
   font-family: var(--sv-font-family);
   color: var(--sv-color-text);
   background: var(--sv-color-bg);

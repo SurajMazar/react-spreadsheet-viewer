@@ -85,7 +85,9 @@ sheet-viewer/
 │   │   │   │   ├── Cell.tsx         # Read-only cell renderer (wrapping, comments, conditional formatting)
 │   │   │   │   └── EditableCell.tsx # Editable cell (with data validation: dropdowns, number/date rules)
 │   │   │   ├── Toolbar.tsx          # Top toolbar (download, chart toggle)
-│   │   │   ├── FormulaBar.tsx       # Cell reference input + cell value display
+│   │   │   ├── ZoomControl.tsx      # Google Sheets-style zoom picker (hosted by FormulaBar)
+│   │   │   ├── ToolsSection.tsx     # Renders consumer-registered tools + builds their context
+│   │   │   ├── FormulaBar.tsx       # Cell reference input + value display + tools/zoom actions
 │   │   │   ├── SheetTabs.tsx        # Bottom sheet tab bar
 │   │   │   ├── StatusBar.tsx        # Bottom status bar (row/col count, selection info)
 │   │   │   ├── SearchBar.tsx        # Ctrl+F search overlay
@@ -100,8 +102,13 @@ sheet-viewer/
 │   │   │   └── evaluator.ts        # Rule evaluator (greaterThan, colorScale, dataBar, etc.)
 │   │   ├── validation/
 │   │   │   └── validator.ts        # Data validation (list, number, date, custom)
+│   │   ├── tools/
+│   │   │   └── defineTool.ts       # defineSheetViewerTool — binds a tool's typed config
 │   │   ├── utils/
 │   │   │   ├── rangeParser.ts       # A1-style reference parsing (A1, A1:B10, A:A, 1:1)
+│   │   │   ├── zoom.ts              # Zoom clamping/stepping + pixel scaling
+│   │   │   ├── autoFit.ts           # Canvas-based column auto-fit measurement
+│   │   │   ├── columnWidths.ts      # Excel !cols → pixel widths
 │   │   │   ├── clipboard.ts         # TSV + HTML copy/paste with style preservation
 │   │   │   ├── download.ts          # Export as XLSX or CSV
 │   │   │   ├── pivotReconstructor.ts # Reconstruct pivot tables from XLSX XML
@@ -206,6 +213,17 @@ interface SheetViewerProps {
   highlightBorderColor?: string; // Custom border color for the selected range (e.g. "#ff0000")
   highlightable?: boolean;       // Enable cell/range highlighting visuals (default: true)
   gridLines?: GridLineConfig[];  // Data-driven cell borders on arbitrary ranges (Excel "All Borders")
+  tools?: SheetViewerTool[];     // Tools registered into the formula bar's action group
+  toolsPlacement?: 'left' | 'right';  // Which end the tools sit at (default: 'left')
+  renderLoading?: (state: SheetViewerLoadingState) => ReactNode;  // Replace the loading UI
+  zoomable?: boolean;            // Show the zoom control in the formula bar (default: true)
+  zoomPlacement?: 'left' | 'right';   // Which end the zoom control sits at (default: 'left')
+  zoom?: number;                 // Zoom factor (1 = 100%); user can still zoom afterwards
+  defaultZoom?: number;          // Starting zoom when `zoom` is not supplied (default: 1)
+  zoomLevels?: number[];         // Levels offered by the control (default: [0.5,0.75,0.9,1,1.25,1.5,2])
+  minZoom?: number;              // Lowest allowed zoom (default: 0.25)
+  maxZoom?: number;              // Highest allowed zoom (default: 4)
+  onZoomChange?: (zoom: number) => void;
   showToolbar?: boolean;         // Show/hide the entire toolbar row (default: true)
   showFileName?: boolean;        // Show/hide only the filename/logo in the toolbar (default: true)
   theme?: SheetViewerTheme;      // Override the entire library color palette
@@ -242,7 +260,13 @@ interface SheetViewerHandle {
   clearHighlight(options?: { silent?: boolean }): void;
   getHighlight(): string | null;
   setColumnWidth(colIndex: number, width: number, sheetName?: string): void;
+  autoFitColumn(colIndex: number, sheetName?: string): number | null;
   setRowHeight(rowIndex: number, height: number, sheetName?: string): void;
+  getZoom(): number;
+  setZoom(zoom: number): void;
+  zoomIn(): void;
+  zoomOut(): void;
+  resetZoom(): void;
   getCellComment(cellRef: string, sheetName?: string): CellComment | null;
   setCellComment(cellRef: string, text: string | null, author?: string, sheetName?: string): void;
   undo(): void;
@@ -256,9 +280,16 @@ interface SheetViewerHandle {
 
 ```typescript
 export { SheetViewer } from './SheetViewer';
+export { defineSheetViewerTool } from './tools/defineTool';
+export { ZOOM_LEVELS, MIN_ZOOM, MAX_ZOOM, DEFAULT_ZOOM } from './utils/zoom';
+export { AUTO_FIT_MIN_WIDTH, AUTO_FIT_MAX_WIDTH } from './utils/autoFit';
 export type {
   SheetViewerProps, SheetViewerHandle, SheetViewerSource, SheetViewerMode,
   SheetViewerTheme,
+  SheetViewerTool, SheetViewerToolDefinition,
+  SheetViewerToolContext, SheetViewerToolClickContext,
+  SheetViewerToolIcon, SheetViewerToolIconProps, SheetViewerToolsPlacement,
+  SheetViewerLoadingState,
   SheetData, CellRange, CellValue, CellComment, CellStyle,
   ChartOverlay, ChartSeries, ChartType,
   ConditionalFormatRule, ConditionalFormatRuleType,
@@ -389,6 +420,18 @@ Instead, rely on the dependency array + cleanup cancellation pattern. This was a
 ### Main Thread Parsing (Not Web Workers)
 Parsing runs on the main thread with `requestAnimationFrame` yields. This was a deliberate choice to avoid Worker complexity and serialization overhead. The trade-off is acceptable because parsing is I/O-bound and the rAF yields keep the UI at ~60fps.
 
+### Zoom Scales Geometry, Not a CSS Transform
+Zoom multiplies the sizes the virtualizer measures — column widths, row heights, header bands — and scales grid type/padding through the `--sv-zoom` custom property. It deliberately does **not** wrap the scroll container in `transform: scale()`. Because every measurement stays in real screen pixels, hit testing, scroll offsets, `measurementsCache` and every overlay derived from it (highlight area, copy indicator, merged spans) remain correct at any zoom with no coordinate translation.
+
+Two consequences to keep in mind when touching the grid:
+- The store holds **base** (unzoomed) sizes. Anything reading a pointer delta must divide by `zoom` before writing a width/height back (see the resize handler).
+- Changing zoom must call `colVirtualizer.measure()` / `rowVirtualizer.measure()`, or the cached offsets drift away from the headers.
+
+`ChartOverlays` is the one exception: it anchors in unzoomed grid coordinates, so `VirtualGrid` scales that whole layer with a transform instead.
+
+### Column Widths Need `cellStyles: true`
+SheetJS only parses `<cols>` into `worksheet['!cols']` when the workbook is read with `cellStyles: true`. Without that flag it is `undefined` and every author-set column width is silently dropped. `src/lib/utils/columnWidths.ts` converts the resulting entries (`wpx` → `wch` → raw `width`) to pixels. Columns the author never sized are left as **holes** in `colWidths`, so they fall back to the viewer's 100px default rather than Excel's narrower 64px one.
+
 ### XLSX Internal XML Access
 For features that SheetJS doesn't expose (pivot tables, embedded charts), the raw `.xlsx` ZIP is decompressed with `fflate` and the internal XML files are parsed manually:
 - `pivotReconstructor.ts` reads `xl/pivotTables/*.xml` and `xl/pivotCache/*.xml`
@@ -497,14 +540,20 @@ npm publish --otp=<code>    # Requires 2FA OTP from authenticator app
 | `src/lib/components/Grid/VirtualGrid.tsx` | ~550 | Virtualized grid (main render, merge handling, copy/paste, scroll fixes) |
 | `src/lib/components/Grid/Cell.tsx` | ~135 | Read-only cell (highlight colors, search match, grid lines, data-cell attr) |
 | `src/lib/components/Grid/EditableCell.tsx` | ~90 | Editable cell |
-| `src/lib/components/Toolbar.tsx` | ~50 | Top toolbar |
-| `src/lib/components/FormulaBar.tsx` | ~70 | Formula/range input bar |
+| `src/lib/components/Toolbar.tsx` | ~110 | Top toolbar (charts, download, filename) |
+| `src/lib/components/ZoomControl.tsx` | ~100 | Zoom picker dropdown (levels/bounds read from the store) |
+| `src/lib/components/ToolsSection.tsx` | ~110 | Renders registered tools; assembles each tool's context |
+| `src/lib/tools/defineTool.ts` | ~50 | `defineSheetViewerTool` — infers and binds a tool's config |
+| `src/lib/components/FormulaBar.tsx` | ~130 | Formula/range input bar; hosts the tools + zoom action group |
 | `src/lib/components/SheetTabs.tsx` | ~40 | Sheet tab bar |
 | `src/lib/components/StatusBar.tsx` | ~40 | Bottom status bar |
 | `src/lib/components/SearchBar.tsx` | ~150 | Ctrl+F search (uses dedicated searchMatches store state, not selection) |
 | `src/lib/components/ChartPanel.tsx` | ~130 | Chart creation panel |
 | `src/lib/components/ChartOverlays.tsx` | ~100 | Floating embedded charts |
 | `src/lib/utils/rangeParser.ts` | ~185 | Excel reference parsing |
+| `src/lib/utils/zoom.ts` | ~85 | Zoom clamping, level stepping, label formatting, pixel scaling |
+| `src/lib/utils/autoFit.ts` | ~180 | Canvas text measurement + per-column auto-fit width |
+| `src/lib/utils/columnWidths.ts` | ~100 | SheetJS `!cols` → pixel widths (wpx/wch/width, clamped) |
 | `src/lib/utils/clipboard.ts` | ~147 | TSV copy/paste utilities for Excel-compatible clipboard |
 | `src/lib/utils/download.ts` | ~60 | XLSX/CSV export |
 | `src/lib/utils/pivotReconstructor.ts` | ~438 | Pivot table reconstruction |
@@ -547,12 +596,29 @@ npm publish --otp=<code>    # Requires 2FA OTP from authenticator app
 - **No dark mode** — CSS variables are defined but only light theme values exist.
 - **No row/column freeze** — only sticky headers, no user-defined freeze panes.
 - **No sort/filter** — data is displayed as-is from the file.
+- **Hidden columns render** — `hidden="1"` on a `<col>` is not honoured; such columns render at the default width.
+- **Row heights are not preserved** — `!rows` is available now that `cellStyles: true` is set, but is not read.
 - **Image extraction** — SheetJS `!images` support is limited; images may not render for all files.
 - **README.md** — comprehensive; update if the public API changes.
 
 ## 16. Recently Added Features
 
 These features were added after the initial release:
+
+### Custom Loading UI
+`renderLoading` replaces the built-in card, receiving `{ progress, status, fileName, isFetching }`. It renders inside the viewer's own `.sv-loading-overlay`, so consumers describe content only; returning `null` shows nothing.
+
+### Zoom
+Dropdown at the start of the formula bar row (`ZoomControl`, hosted by `FormulaBar`) plus Ctrl/Cmd + wheel over the grid, backed by `zoom` / `zoomLevels` / `minZoom` / `maxZoom` / `onZoomChange` props and `getZoom`/`setZoom`/`zoomIn`/`zoomOut`/`resetZoom` on the handle. Store state lives in `ViewerContext`; the maths is in `src/lib/utils/zoom.ts`. `zoomIn`/`zoomOut` walk the `zoomLevels` ladder and stop at its ends — `minZoom`/`maxZoom` bound `setZoom`, they are not extra rungs, so stepping never lands on a level the picker does not offer. See §10 for why it scales geometry rather than transforming.
+
+### Excel Column Width Preservation
+`XLSX.read` now passes `cellStyles: true` so `!cols` is populated, and `src/lib/utils/columnWidths.ts` converts it to pixels. See §10.
+
+### Auto-Fit Column Width
+Double-clicking a column header's resize handle sizes it to its widest cell. Measurement is canvas-based (`src/lib/utils/autoFit.ts`) because the grid is virtualized and most cells have no DOM node. Per-cell bold/italic/font-size are honoured, multi-column merges are excluded, results are clamped to 30–500px, and the scan stops at `AUTO_FIT_MAX_SCAN_ROWS` so the gesture stays instant on huge sheets. Also exposed as `ref.autoFitColumn(col)`.
+
+### Extensible Tools
+The `tools` prop registers tools into a formula bar action group (`.sv-formula-bar-actions-left` / `-right`), next to the zoom control — deliberately not the toolbar, so both stay reachable under `showToolbar={false}`. `toolsPlacement` and `zoomPlacement` pick the end independently, and a tool's own `placement` overrides `toolsPlacement` so one tool can sit opposite the rest. `ToolsSection` renders them and builds each tool's context, injecting the same `SheetViewerHandle` the ref exposes. Tools needing options use `defineSheetViewerTool`, which infers `TConfig` from `config`, type-checks the callbacks against it, and binds it in — so `tools` stays a homogeneous `SheetViewerTool[]` with no `any` while each tool's config is checked at its definition site. The viewer knows nothing about any specific tool.
 
 ### Copy & Paste with Style Preservation
 Full clipboard support writing both HTML (with inline styles) and TSV formats via `navigator.clipboard.write()`. On paste, HTML is preferred (preserving colors, bold, italic); falls back to TSV for plain-text sources. Utility functions in `src/lib/utils/clipboard.ts`.

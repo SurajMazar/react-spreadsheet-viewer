@@ -628,3 +628,44 @@ html, body, #root {
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: translateY(0); }
 }
+
+/* Custom loading UI passed to SheetViewer via renderLoading */
+.demo-custom-loader {
+  width: 300px;
+  padding: 24px;
+  text-align: center;
+  border-radius: 12px;
+  background: #0f172a;
+  color: #e2e8f0;
+  box-shadow: 0 8px 30px rgba(15, 23, 42, 0.35);
+}
+
+.demo-custom-loader-name {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.demo-custom-loader-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(226, 232, 240, 0.18);
+  overflow: hidden;
+}
+
+.demo-custom-loader-fill {
+  height: 100%;
+  border-radius: 3px;
+  background: linear-gradient(90deg, #38bdf8, #a78bfa);
+  transition: width 0.2s ease;
+}
+
+.demo-custom-loader-status {
+  margin-top: 12px;
+  font-size: 12px;
+  color: #94a3b8;
+  font-variant-numeric: tabular-nums;
+}

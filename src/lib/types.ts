@@ -2,7 +2,20 @@
 // Shared type definitions for the SheetViewer component
 // ============================================================
 
-import type { Ref } from 'react';
+import type { ComponentType, HTMLAttributes, ReactElement, ReactNode, Ref } from 'react';
+
+/**
+ * Extra attributes applied to the highlight area element (the one
+ * `highlightAreaRef` receives) — `id`, `data-*`, `aria-*`, `title`, `className`,
+ * `style`, event handlers, and so on.
+ *
+ * `className` is appended to `sv-highlight-area` rather than replacing it, and
+ * the element's computed geometry (top/left/width/height) always wins over any
+ * `style` passed here — everything else in `style` is applied as given.
+ */
+export type HighlightAreaAttributes = HTMLAttributes<HTMLDivElement> & {
+  [key: `data-${string}`]: string | number | boolean | undefined;
+};
 
 /** A single cell value in a sheet */
 export type CellValue = string | number | boolean | null | undefined;
@@ -205,6 +218,126 @@ export interface SheetViewerTheme {
   hoverColor?: string;
 }
 
+// ============================================================
+// Tools
+// ============================================================
+
+/** Props an icon component is rendered with inside a tool button. */
+export interface SheetViewerToolIconProps {
+  /** Edge length the toolbar draws icons at, in pixels. */
+  size: number;
+}
+
+/**
+ * A tool's icon: either a component the toolbar renders at its own size, or a
+ * ready-made element when the tool wants full control over it.
+ */
+export type SheetViewerToolIcon = ComponentType<SheetViewerToolIconProps> | ReactElement;
+
+/**
+ * The viewer state a tool is handed on every call.
+ *
+ * `viewer` is the same imperative surface the `ref` exposes, so a tool reads
+ * and drives the sheet through the one documented API rather than reaching
+ * into internals. Everything else is a snapshot, captured at call time.
+ */
+export interface SheetViewerToolContext {
+  /** Imperative viewer API, identical to the one on the component ref. */
+  viewer: SheetViewerHandle;
+  /** Loaded file name, or null before a file has been parsed. */
+  fileName: string | null;
+  /** Every sheet in the workbook. */
+  sheetNames: string[];
+  /** Name of the sheet on screen. */
+  activeSheet: string | null;
+  /** Data for the active sheet. */
+  sheetData: SheetData | null;
+  /** Currently selected ranges — empty when there is no selection. */
+  selection: CellRange[];
+  /** Anchor cell of the selection, if any. */
+  activeCell: ActiveCell | null;
+  /** Current zoom factor (1 = 100%). */
+  zoom: number;
+  /** Whether the viewer is in view or edit mode. */
+  mode: SheetViewerMode;
+}
+
+/** Context for a tool's click handler, which also gets its own button element. */
+export interface SheetViewerToolClickContext extends SheetViewerToolContext {
+  /** The tool's button, for anchoring a popover or menu to it. */
+  element: HTMLButtonElement;
+}
+
+/**
+ * A tool rendered in the toolbar's Tools section.
+ *
+ * Tools that need configuration should be built with `defineSheetViewerTool`,
+ * which type-checks the config against the handler at the definition site and
+ * binds it in — so this stays a single concrete type with no `any` in it, and
+ * a `tools` array can mix tools that share nothing but this shape.
+ */
+export interface SheetViewerTool {
+  /** Stable identifier, unique within a `tools` array. */
+  id: string;
+  /** Tooltip and accessible name. */
+  label: string;
+  /** Icon shown on the button. */
+  icon: SheetViewerToolIcon;
+  /** Invoked when the user activates the tool. */
+  onClick: (context: SheetViewerToolClickContext) => void;
+  /** Render the label next to the icon instead of tooltip-only. Default: false */
+  showLabel?: boolean;
+  /**
+   * Pin this tool to one end of the formula bar row, overriding the viewer's
+   * `toolsPlacement`. Leave unset to follow it — most tools should.
+   */
+  placement?: SheetViewerToolsPlacement;
+  /** Grey the tool out. Re-evaluated whenever the viewer state changes. */
+  isDisabled?: (context: SheetViewerToolContext) => boolean;
+  /** Render the tool in its active/pressed state. */
+  isActive?: (context: SheetViewerToolContext) => boolean;
+}
+
+/**
+ * A tool plus its own configuration, for use with `defineSheetViewerTool`.
+ *
+ * `TConfig` is inferred from `config`, so each callback sees the exact config
+ * type that tool declared — a misspelled or missing option is a compile error
+ * where the tool is written, not a runtime surprise where it runs.
+ */
+export interface SheetViewerToolDefinition<TConfig> {
+  id: string;
+  label: string;
+  icon: SheetViewerToolIcon;
+  /** Options this tool needs, of whatever shape the tool defines. */
+  config: TConfig;
+  onClick: (context: SheetViewerToolClickContext, config: TConfig) => void;
+  showLabel?: boolean;
+  placement?: SheetViewerToolsPlacement;
+  isDisabled?: (context: SheetViewerToolContext, config: TConfig) => boolean;
+  isActive?: (context: SheetViewerToolContext, config: TConfig) => boolean;
+}
+
+/** Which end of the formula bar row a control sits at. */
+export type SheetViewerToolsPlacement = 'left' | 'right';
+
+/**
+ * Progress of the load, handed to a custom loading renderer.
+ *
+ * Covers both phases the viewer goes through — fetching or reading the source,
+ * then parsing it — so a renderer can show one continuous progress indicator.
+ */
+export interface SheetViewerLoadingState {
+  /** Overall progress, 0–100. */
+  progress: number;
+  /** Human-readable step, e.g. `"Parsing workbook..."`. Empty while fetching. */
+  status: string;
+  /** Name of the file being loaded, when known. */
+  fileName: string | null;
+  /** True while the source is still being fetched or read, before parsing starts. */
+  isFetching: boolean;
+}
+
 /** Props for the SheetViewer component */
 export interface SheetViewerProps {
   /** URL, File, ArrayBuffer, or TypedArray to load */
@@ -235,8 +368,63 @@ export interface SheetViewerProps {
    * before React commits, so the element is not positioned yet.
    */
   highlightAreaRef?: Ref<HTMLDivElement>;
+  /**
+   * Extra HTML attributes for the highlight area element — `id`, `data-*`,
+   * `aria-*`, `className`, `style`, event handlers, etc. Useful for hooking the
+   * highlighted region up to `aria-describedby`, a test id, or a popover library
+   * that resolves its anchor by id.
+   *
+   * `className` is appended to `sv-highlight-area` (never replaces it) and the
+   * element's own geometry always wins over `style`. The element is
+   * `pointer-events: none` by default; pass `style={{ pointerEvents: 'auto' }}`
+   * to make it interactive.
+   */
+  highlightAreaProps?: HighlightAreaAttributes;
   /** Grid line configs: ranges with visible cell borders (like Excel's All Borders) */
   gridLines?: GridLineConfig[];
+  /**
+   * Tools to register in the formula bar's Tools section. The viewer renders
+   * whatever is passed and knows nothing about what any of them do, so new
+   * functionality is added here rather than inside the component.
+   */
+  tools?: SheetViewerTool[];
+  /**
+   * Which end of the formula bar row the tools sit at. Default: `'left'`.
+   * Independent of `zoomPlacement`, so tools and the zoom control can sit at
+   * opposite ends.
+   */
+  toolsPlacement?: SheetViewerToolsPlacement;
+  /** Show the zoom control in the formula bar. Default: true */
+  zoomable?: boolean;
+  /** Which end of the formula bar row the zoom control sits at. Default: `'left'` */
+  zoomPlacement?: SheetViewerToolsPlacement;
+  /**
+   * Zoom factor (1 = 100%). Changing it re-zooms the grid; the user can still
+   * zoom from the control afterwards, which reports back via `onZoomChange`.
+   */
+  zoom?: number;
+  /** Zoom factor to start at when `zoom` is not supplied. Default: 1 */
+  defaultZoom?: number;
+  /** Levels the zoom control offers. Default: [0.5, 0.75, 0.9, 1, 1.25, 1.5, 2] */
+  zoomLevels?: number[];
+  /** Lowest zoom the viewer will go to. Default: 0.25 */
+  minZoom?: number;
+  /** Highest zoom the viewer will go to. Default: 4 */
+  maxZoom?: number;
+  /** Called whenever the zoom factor changes, from the control or the API */
+  onZoomChange?: (zoom: number) => void;
+  /**
+   * Replace the built-in loading UI shown while the file is fetched and parsed.
+   *
+   * Rendered inside the viewer's own full-bleed overlay, so the returned node
+   * only has to describe the content — positioning and stacking are handled.
+   * Return `null` to show nothing at all.
+   *
+   * ```tsx
+   * renderLoading={({ progress, status }) => <MySpinner label={status} value={progress} />}
+   * ```
+   */
+  renderLoading?: (state: SheetViewerLoadingState) => ReactNode;
   /** Show the toolbar (filename, Charts, Download buttons). Default: true */
   showToolbar?: boolean;
   /** Show the filename in the toolbar. Default: true. When false the logo+name are hidden but Charts/Download remain. */
@@ -311,8 +499,24 @@ export interface SheetViewerHandle {
   getCellRangeData(range: string, sheetName?: string): CellValue[][] | null;
   /** Get cell values for the currently selected range (drag/mouse selection). Returns null if no range is selected. */
   getSelectedRangeData(): CellValue[][] | null;
+  /** Get the current zoom factor (1 = 100%). */
+  getZoom(): number;
+  /** Set the zoom factor. Clamped to `minZoom`/`maxZoom`. */
+  setZoom(zoom: number): void;
+  /** Step up to the next zoom level. */
+  zoomIn(): void;
+  /** Step down to the previous zoom level. */
+  zoomOut(): void;
+  /** Return to 100% zoom. */
+  resetZoom(): void;
   /** Programmatically set a column width (in pixels). Minimum 30px. */
   setColumnWidth(colIndex: number, width: number, sheetName?: string): void;
+  /**
+   * Resize a column to fit its widest content, the same as double-clicking the
+   * edge of its header. Returns the applied width, or null when the column is
+   * empty and was therefore left alone.
+   */
+  autoFitColumn(colIndex: number, sheetName?: string): number | null;
   /** Programmatically set a row height (in pixels). Minimum 20px. */
   setRowHeight(rowIndex: number, height: number, sheetName?: string): void;
   /** Get a cell comment for the given "A1" or "row,col" key. */
@@ -396,6 +600,16 @@ export interface ViewerState {
   /** Index of the currently focused search match */
   searchActiveIndex: number;
 
+  // Zoom
+  /** Current zoom factor (1 = 100%) */
+  zoom: number;
+  /** Levels the zoom control offers */
+  zoomLevels: number[];
+  /** Lowest zoom the viewer allows */
+  minZoom: number;
+  /** Highest zoom the viewer allows */
+  maxZoom: number;
+
   // Mode
   mode: SheetViewerMode;
 
@@ -431,6 +645,14 @@ export interface ViewerState {
   setRowHeight: (sheetName: string, rowIndex: number, height: number) => void;
   setCellComment: (sheetName: string, row: number, col: number, comment: CellComment | null) => void;
   setMode: (mode: SheetViewerMode) => void;
+  /** Set the zoom factor. Clamped to the store's min/max. */
+  setZoom: (zoom: number) => void;
+  /** Replace the zoom bounds and level list, re-clamping the current zoom. */
+  setZoomConfig: (config: { levels?: number[]; min?: number; max?: number }) => void;
+  /** Step up to the next zoom level. */
+  zoomIn: () => void;
+  /** Step down to the previous zoom level. */
+  zoomOut: () => void;
   getCurrentSheetData: () => SheetData | null;
   pushUndo: (entry: UndoEntry) => void;
   undo: () => void;

@@ -183,10 +183,12 @@ describe('Cell — CellStyle formatting', () => {
     expect((container.firstElementChild as HTMLElement).style.fontStyle).toBe('italic');
   });
 
-  it('applies font size in pt', () => {
+  it('applies font size in pt, scaled by the grid zoom', () => {
     const cellStyle: CellStyle = { fontSize: 14 };
     const { container } = renderCell({ cellStyle });
-    expect((container.firstElementChild as HTMLElement).style.fontSize).toBe('14pt');
+    expect((container.firstElementChild as HTMLElement).style.fontSize).toBe(
+      'calc(14pt * var(--sv-zoom))'
+    );
   });
 
   it('applies text alignment', () => {

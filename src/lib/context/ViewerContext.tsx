@@ -1,6 +1,14 @@
 import React, { createContext, useContext, useRef, type ReactNode } from 'react';
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import { useStoreWithEqualityFn } from 'zustand/traditional';
+import {
+  clampZoom,
+  stepZoom,
+  DEFAULT_ZOOM,
+  ZOOM_LEVELS,
+  MIN_ZOOM,
+  MAX_ZOOM,
+} from '../utils/zoom';
 import type {
   ViewerState,
   SelectionState,
@@ -30,8 +38,12 @@ const ViewerContext = createContext<StoreApi<ViewerState> | null>(null);
 /**
  * Creates the initial store state + actions.
  * Each <SheetViewer /> instance gets its own isolated store.
+ *
+ * Exported so the store's actions can be unit-tested directly, without
+ * standing up a React tree — and without a second copy of this factory that
+ * would drift out of sync with it.
  */
-function createViewerStore(): StoreApi<ViewerState> {
+export function createViewerStore(): StoreApi<ViewerState> {
   return createStore<ViewerState>((set, get) => ({
     // File state
     fileName: null,
@@ -58,6 +70,12 @@ function createViewerStore(): StoreApi<ViewerState> {
     copiedRange: null,
     searchMatches: [],
     searchActiveIndex: 0,
+
+    // Zoom
+    zoom: DEFAULT_ZOOM,
+    zoomLevels: [...ZOOM_LEVELS],
+    minZoom: MIN_ZOOM,
+    maxZoom: MAX_ZOOM,
 
     // Undo / Redo
     undoStack: [],
@@ -240,6 +258,46 @@ function createViewerStore(): StoreApi<ViewerState> {
     },
 
     setMode: (mode: SheetViewerMode) => set({ mode }),
+
+    setZoom: (zoom: number) => {
+      const state = get();
+      const next = clampZoom(zoom, state.minZoom, state.maxZoom);
+      if (next !== state.zoom) set({ zoom: next });
+    },
+
+    setZoomConfig: (config: { levels?: number[]; min?: number; max?: number }) => {
+      const state = get();
+      const min = config.min ?? state.minZoom;
+      const max = config.max ?? state.maxZoom;
+      const levels = config.levels ?? state.zoomLevels;
+      // Re-clamp the live zoom: narrowing the bounds must not leave the viewer
+      // parked outside them.
+      const zoom = clampZoom(state.zoom, min, max);
+
+      // Compared by value, not identity: consumers pass `zoomLevels` as an
+      // inline array literal, which is a fresh reference on every render. An
+      // unconditional set would republish identical config each time and
+      // re-render every zoom subscriber for nothing.
+      const unchanged =
+        min === state.minZoom &&
+        max === state.maxZoom &&
+        zoom === state.zoom &&
+        levels.length === state.zoomLevels.length &&
+        levels.every((level, i) => level === state.zoomLevels[i]);
+      if (unchanged) return;
+
+      set({ minZoom: min, maxZoom: max, zoomLevels: levels, zoom });
+    },
+
+    zoomIn: () => {
+      const state = get();
+      state.setZoom(stepZoom(state.zoom, 'in', state.zoomLevels, state.minZoom, state.maxZoom));
+    },
+
+    zoomOut: () => {
+      const state = get();
+      state.setZoom(stepZoom(state.zoom, 'out', state.zoomLevels, state.minZoom, state.maxZoom));
+    },
 
     getCurrentSheetData: (): SheetData | null => {
       const state = get();

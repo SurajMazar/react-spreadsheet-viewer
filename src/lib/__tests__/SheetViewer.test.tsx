@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, waitFor, screen, act } from '@testing-library/react';
 import React, { createRef } from 'react';
 import { SheetViewer } from '../index';
-import type { SheetViewerHandle, CellRange } from '../types';
+import type { SheetViewerHandle, CellRange, SheetViewerLoadingState } from '../types';
 
 // Mock requestAnimationFrame to resolve immediately in jsdom
 beforeEach(() => {
@@ -781,6 +781,81 @@ describe('SheetViewer — highlightAreaRef', () => {
 });
 
 // =============================================
+// highlightAreaProps — extra attributes on the highlight area element
+// =============================================
+describe('SheetViewer — highlightAreaProps', () => {
+  const renderWithProps = async (
+    props: React.ComponentProps<typeof SheetViewer>['highlightAreaProps']
+  ) => {
+    const ref = createRef<SheetViewerHandle>();
+    const areaRef = createRef<HTMLDivElement>();
+    render(
+      <SheetViewer
+        ref={ref}
+        highlightAreaRef={areaRef}
+        highlightAreaProps={props}
+        source={createCsvFile(sampleCsv)}
+        height={600}
+        width={800}
+      />
+    );
+    await multiSheetHelper(ref);
+    act(() => { ref.current?.setHighlight('A1:B2'); });
+    return { ref, areaRef };
+  };
+
+  it('applies an id to the highlight area element', async () => {
+    const { areaRef } = await renderWithProps({ id: 'my-anchor' });
+    expect(areaRef.current?.id).toBe('my-anchor');
+    expect(document.getElementById('my-anchor')).toBe(areaRef.current);
+  }, 15000);
+
+  it('applies data-* and aria attributes', async () => {
+    const { areaRef } = await renderWithProps({
+      'data-testid': 'highlight-box',
+      'data-region': 'totals',
+      title: 'Selected region',
+    });
+    expect(areaRef.current?.getAttribute('data-testid')).toBe('highlight-box');
+    expect(areaRef.current?.getAttribute('data-region')).toBe('totals');
+    expect(areaRef.current?.getAttribute('title')).toBe('Selected region');
+  }, 15000);
+
+  it('appends className instead of replacing sv-highlight-area', async () => {
+    const { ref, areaRef } = await renderWithProps({ className: 'my-anchor-class' });
+    expect(areaRef.current?.classList.contains('sv-highlight-area')).toBe(true);
+    expect(areaRef.current?.classList.contains('my-anchor-class')).toBe(true);
+    // getHighlightElement queries .sv-highlight-area, so it must still resolve
+    expect(ref.current?.getHighlightElement()).toBe(areaRef.current);
+  }, 15000);
+
+  it('merges style but keeps the measured geometry authoritative', async () => {
+    const { areaRef } = await renderWithProps({
+      style: { pointerEvents: 'auto', outline: '2px dashed red', top: 9999, width: 1 },
+    });
+    const el = areaRef.current!;
+    expect(el.style.pointerEvents).toBe('auto');
+    expect(el.style.outline).toBe('2px dashed red');
+    // Consumer top/width must not win over the computed box (A1:B2 => 200x52 at 0,0)
+    expect(el.style.top).toBe('0px');
+    expect(el.style.width).toBe('200px');
+    expect(el.style.height).toBe('52px');
+  }, 15000);
+
+  it('allows overriding the default aria-hidden', async () => {
+    const { areaRef } = await renderWithProps({ 'aria-hidden': false, role: 'presentation' });
+    expect(areaRef.current?.getAttribute('aria-hidden')).toBe('false');
+    expect(areaRef.current?.getAttribute('role')).toBe('presentation');
+  }, 15000);
+
+  it('is aria-hidden by default when no props are passed', async () => {
+    const { areaRef } = await renderWithProps(undefined);
+    expect(areaRef.current?.getAttribute('aria-hidden')).toBe('true');
+    expect(areaRef.current?.className).toBe('sv-highlight-area');
+  }, 15000);
+});
+
+// =============================================
 // scrollToSelection — explicit, on-demand scroll
 // (jsdom has no layout, so clientHeight/clientWidth are 0 and the scroll math
 //  itself is covered in gridGeometry.test.ts; these cover the wiring.)
@@ -855,4 +930,441 @@ describe('SheetViewer — scrollToSelection', () => {
     act(() => { ref.current?.clearHighlight(); });
     expect(ref.current?.scrollToSelection()).toBe(false);
   }, 15000);
+});
+
+// =============================================
+// Zoom
+// =============================================
+describe('SheetViewer — Zoom', () => {
+  it('renders the zoom control at 100% by default', async () => {
+    const ref = createRef<SheetViewerHandle>();
+    render(<SheetViewer ref={ref} source={createCsvFile(sampleCsv)} height={600} width={800} />);
+    await multiSheetHelper(ref);
+
+    expect(screen.getByRole('button', { name: 'Zoom' }).textContent).toContain('100%');
+  });
+
+  it('hides the zoom control when zoomable is false', async () => {
+    const ref = createRef<SheetViewerHandle>();
+    render(
+      <SheetViewer ref={ref} source={createCsvFile(sampleCsv)} height={600} width={800} zoomable={false} />
+    );
+    await multiSheetHelper(ref);
+
+    expect(screen.queryByRole('button', { name: 'Zoom' })).toBeNull();
+  });
+
+  it('keeps the zoom control when the toolbar is hidden', async () => {
+    const ref = createRef<SheetViewerHandle>();
+    render(
+      <SheetViewer ref={ref} source={createCsvFile(sampleCsv)} height={600} width={800} showToolbar={false} />
+    );
+    await multiSheetHelper(ref);
+
+    // It lives in the formula bar, not the toolbar, so showToolbar does not hide it.
+    expect(document.querySelector('.sv-toolbar')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Zoom' })).toBeTruthy();
+  });
+
+  it('exposes zoom through the ref handle', async () => {
+    const ref = createRef<SheetViewerHandle>();
+    render(<SheetViewer ref={ref} source={createCsvFile(sampleCsv)} height={600} width={800} />);
+    await multiSheetHelper(ref);
+
+    expect(ref.current?.getZoom()).toBe(1);
+
+    act(() => { ref.current?.zoomIn(); });
+    expect(ref.current?.getZoom()).toBe(1.25);
+
+    act(() => { ref.current?.setZoom(0.5); });
+    expect(ref.current?.getZoom()).toBe(0.5);
+
+    act(() => { ref.current?.resetZoom(); });
+    expect(ref.current?.getZoom()).toBe(1);
+  });
+
+  it('clamps the zoom to the minZoom/maxZoom props', async () => {
+    const ref = createRef<SheetViewerHandle>();
+    render(
+      <SheetViewer
+        ref={ref}
+        source={createCsvFile(sampleCsv)}
+        height={600}
+        width={800}
+        minZoom={0.75}
+        maxZoom={1.5}
+      />
+    );
+    await multiSheetHelper(ref);
+
+    act(() => { ref.current?.setZoom(5); });
+    expect(ref.current?.getZoom()).toBe(1.5);
+
+    act(() => { ref.current?.setZoom(0.1); });
+    expect(ref.current?.getZoom()).toBe(0.75);
+  });
+
+  it('applies the zoom prop and reports changes through onZoomChange', async () => {
+    const ref = createRef<SheetViewerHandle>();
+    const onZoomChange = vi.fn();
+    render(
+      <SheetViewer
+        ref={ref}
+        source={createCsvFile(sampleCsv)}
+        height={600}
+        width={800}
+        zoom={0.75}
+        onZoomChange={onZoomChange}
+      />
+    );
+    await multiSheetHelper(ref);
+
+    expect(ref.current?.getZoom()).toBe(0.75);
+
+    act(() => { ref.current?.zoomIn(); });
+    expect(onZoomChange).toHaveBeenLastCalledWith(0.9);
+  });
+
+  it('scales the header bands with the zoom factor', async () => {
+    const ref = createRef<SheetViewerHandle>();
+    render(<SheetViewer ref={ref} source={createCsvFile(sampleCsv)} height={600} width={800} />);
+    await multiSheetHelper(ref);
+
+    const rowHeaders = () => document.querySelector('.sv-row-headers') as HTMLElement;
+    expect(rowHeaders().style.width).toBe('50px');
+
+    act(() => { ref.current?.setZoom(0.5); });
+    await waitFor(() => { expect(rowHeaders().style.width).toBe('25px'); });
+
+    act(() => { ref.current?.setZoom(2); });
+    await waitFor(() => { expect(rowHeaders().style.width).toBe('100px'); });
+  });
+
+  it('publishes the zoom factor as a CSS variable for the grid typography', async () => {
+    const ref = createRef<SheetViewerHandle>();
+    render(<SheetViewer ref={ref} source={createCsvFile(sampleCsv)} height={600} width={800} />);
+    await multiSheetHelper(ref);
+
+    const root = document.querySelector('.sheet-viewer') as HTMLElement;
+    expect(root.style.getPropertyValue('--sv-zoom')).toBe('1');
+
+    act(() => { ref.current?.setZoom(1.5); });
+    await waitFor(() => {
+      expect(root.style.getPropertyValue('--sv-zoom')).toBe('1.5');
+    });
+  });
+});
+
+// =============================================
+// Auto-fit column width
+// =============================================
+describe('SheetViewer — autoFitColumn', () => {
+  // jsdom ships no 2D canvas, so stand one in that measures 10px per character.
+  beforeEach(() => {
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
+      font: '',
+      measureText: (text: string) => ({ width: text.length * 10 }),
+    } as unknown as CanvasRenderingContext2D);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('resizes a column to fit its content', async () => {
+    const ref = createRef<SheetViewerHandle>();
+    const csv = 'Short,x\nA much longer value in column one,y';
+    render(<SheetViewer ref={ref} source={createCsvFile(csv)} height={600} width={800} />);
+    await multiSheetHelper(ref);
+
+    let fitted: number | null = null;
+    act(() => { fitted = ref.current?.autoFitColumn(0) ?? null; });
+
+    expect(fitted).not.toBeNull();
+    expect(ref.current?.getSheetData()?.colWidths[0]).toBe(fitted);
+  });
+
+  it('leaves an empty column alone', async () => {
+    const ref = createRef<SheetViewerHandle>();
+    render(<SheetViewer ref={ref} source={createCsvFile(sampleCsv)} height={600} width={800} />);
+    await multiSheetHelper(ref);
+
+    let fitted: number | null = 1;
+    act(() => { fitted = ref.current?.autoFitColumn(20) ?? null; });
+
+    expect(fitted).toBeNull();
+  });
+});
+
+// =============================================
+// Tools
+// =============================================
+describe('SheetViewer — Tools', () => {
+  const StarIcon = ({ size }: { size: number }) => <svg width={size} height={size} />;
+
+  it('renders registered tools in the formula bar', async () => {
+    const ref = createRef<SheetViewerHandle>();
+    render(
+      <SheetViewer
+        ref={ref}
+        source={createCsvFile(sampleCsv)}
+        height={600}
+        width={800}
+        tools={[{ id: 'star', label: 'Star it', icon: StarIcon, onClick: () => {} }]}
+      />
+    );
+    await multiSheetHelper(ref);
+
+    expect(screen.getByRole('button', { name: 'Star it' })).toBeTruthy();
+    expect(
+      document.querySelector('.sv-formula-bar-actions .sv-toolbar-tools')
+    ).not.toBeNull();
+  });
+
+  it('keeps tools available when the toolbar is hidden', async () => {
+    const ref = createRef<SheetViewerHandle>();
+    render(
+      <SheetViewer
+        ref={ref}
+        source={createCsvFile(sampleCsv)}
+        height={600}
+        width={800}
+        showToolbar={false}
+        tools={[{ id: 'star', label: 'Star it', icon: StarIcon, onClick: () => {} }]}
+      />
+    );
+    await multiSheetHelper(ref);
+
+    expect(screen.getByRole('button', { name: 'Star it' })).toBeTruthy();
+  });
+
+  it('hands a tool the same imperative API the ref exposes', async () => {
+    const ref = createRef<SheetViewerHandle>();
+    const onClick = vi.fn();
+    render(
+      <SheetViewer
+        ref={ref}
+        source={createCsvFile(sampleCsv, 'people.csv')}
+        height={600}
+        width={800}
+        tools={[{ id: 'star', label: 'Star it', icon: StarIcon, onClick }]}
+      />
+    );
+    await multiSheetHelper(ref);
+
+    act(() => { screen.getByRole('button', { name: 'Star it' }).click(); });
+
+    const context = onClick.mock.calls[0][0];
+    expect(context.viewer).toBe(ref.current);
+    expect(context.viewer.getFileName()).toBe('people.csv');
+    expect(context.activeSheet).toBe('Sheet1');
+    expect(context.zoom).toBe(1);
+  });
+
+  it('renders no tools section when the prop is omitted', async () => {
+    const ref = createRef<SheetViewerHandle>();
+    render(<SheetViewer ref={ref} source={createCsvFile(sampleCsv)} height={600} width={800} />);
+    await multiSheetHelper(ref);
+
+    expect(document.querySelector('.sv-toolbar-tools')).toBeNull();
+  });
+});
+
+// =============================================
+// Control placement
+// =============================================
+describe('SheetViewer — Control placement', () => {
+  const StarIcon = ({ size }: { size: number }) => <svg width={size} height={size} />;
+  const tools = [{ id: 'star', label: 'Star it', icon: StarIcon, onClick: () => {} }];
+
+  const group = (side: 'left' | 'right') =>
+    document.querySelector(`.sv-formula-bar-actions-${side}`);
+
+  it('puts tools and zoom at the left of the formula bar by default', async () => {
+    const ref = createRef<SheetViewerHandle>();
+    render(
+      <SheetViewer ref={ref} source={createCsvFile(sampleCsv)} height={600} width={800} tools={tools} />
+    );
+    await multiSheetHelper(ref);
+
+    expect(group('left')?.querySelector('.sv-toolbar-tools')).toBeTruthy();
+    expect(group('left')?.querySelector('.sv-zoom-control')).toBeTruthy();
+    expect(group('right')).toBeNull();
+  });
+
+  it('moves the tools to the right when asked', async () => {
+    const ref = createRef<SheetViewerHandle>();
+    render(
+      <SheetViewer
+        ref={ref}
+        source={createCsvFile(sampleCsv)}
+        height={600}
+        width={800}
+        tools={tools}
+        toolsPlacement="right"
+      />
+    );
+    await multiSheetHelper(ref);
+
+    expect(group('right')?.querySelector('.sv-toolbar-tools')).toBeTruthy();
+    expect(group('left')?.querySelector('.sv-toolbar-tools')).toBeFalsy();
+    // Zoom keeps its own placement — the two are independent.
+    expect(group('left')?.querySelector('.sv-zoom-control')).toBeTruthy();
+  });
+
+  it('places tools and zoom at opposite ends', async () => {
+    const ref = createRef<SheetViewerHandle>();
+    render(
+      <SheetViewer
+        ref={ref}
+        source={createCsvFile(sampleCsv)}
+        height={600}
+        width={800}
+        tools={tools}
+        toolsPlacement="left"
+        zoomPlacement="right"
+      />
+    );
+    await multiSheetHelper(ref);
+
+    expect(group('left')?.querySelector('.sv-toolbar-tools')).toBeTruthy();
+    expect(group('right')?.querySelector('.sv-zoom-control')).toBeTruthy();
+  });
+
+  it('anchors the zoom menu to the edge the control sits on', async () => {
+    const ref = createRef<SheetViewerHandle>();
+    render(
+      <SheetViewer ref={ref} source={createCsvFile(sampleCsv)} height={600} width={800} zoomPlacement="right" />
+    );
+    await multiSheetHelper(ref);
+
+    act(() => { screen.getByRole('button', { name: 'Zoom' }).click(); });
+    expect(document.querySelector('.sv-zoom-menu-right')).toBeTruthy();
+    expect(document.querySelector('.sv-zoom-menu-left')).toBeNull();
+  });
+
+  it("lets a single tool override the viewer's placement", async () => {
+    const ref = createRef<SheetViewerHandle>();
+    render(
+      <SheetViewer
+        ref={ref}
+        source={createCsvFile(sampleCsv)}
+        height={600}
+        width={800}
+        tools={[
+          { id: 'star', label: 'Star it', icon: StarIcon, onClick: () => {} },
+          { id: 'info', label: 'Sheet info', icon: StarIcon, placement: 'right', onClick: () => {} },
+        ]}
+      />
+    );
+    await multiSheetHelper(ref);
+
+    expect(group('left')?.querySelector('[data-tool-id="star"]')).toBeTruthy();
+    expect(group('right')?.querySelector('[data-tool-id="info"]')).toBeTruthy();
+    // Each tool appears exactly once, on its own side.
+    expect(document.querySelectorAll('[data-tool-id="info"]').length).toBe(1);
+    expect(group('left')?.querySelector('[data-tool-id="info"]')).toBeFalsy();
+  });
+
+  it('renders no action group at all when both controls are off', async () => {
+    const ref = createRef<SheetViewerHandle>();
+    render(
+      <SheetViewer ref={ref} source={createCsvFile(sampleCsv)} height={600} width={800} zoomable={false} />
+    );
+    await multiSheetHelper(ref);
+
+    expect(document.querySelector('.sv-formula-bar-actions')).toBeNull();
+  });
+});
+
+// =============================================
+// Custom loading UI
+// =============================================
+describe('SheetViewer — renderLoading', () => {
+  it('renders the built-in loading card by default', () => {
+    render(<SheetViewer source={createCsvFile(sampleCsv)} height={600} width={800} />);
+    expect(document.querySelector('.sv-loading-card')).toBeTruthy();
+  });
+
+  it('replaces the loading card with a custom renderer', () => {
+    render(
+      <SheetViewer
+        source={createCsvFile(sampleCsv)}
+        height={600}
+        width={800}
+        renderLoading={() => <div data-testid="custom-loader">Crunching…</div>}
+      />
+    );
+
+    expect(screen.getByTestId('custom-loader')).toBeTruthy();
+    expect(document.querySelector('.sv-loading-card')).toBeNull();
+    // Still inside the viewer's own overlay, so positioning is handled for you.
+    expect(document.querySelector('.sv-loading-overlay [data-testid="custom-loader"]')).toBeTruthy();
+  });
+
+  it('hands the renderer the progress state', () => {
+    const renderLoading = vi.fn((_state: SheetViewerLoadingState) => <div />);
+    render(
+      <SheetViewer
+        source={createCsvFile(sampleCsv)}
+        height={600}
+        width={800}
+        renderLoading={renderLoading}
+      />
+    );
+
+    const state = renderLoading.mock.calls[0][0];
+    expect(typeof state.progress).toBe('number');
+    expect(typeof state.status).toBe('string');
+    expect(typeof state.isFetching).toBe('boolean');
+    // The source is still being read on the first paint, so no name yet.
+    expect(state.isFetching).toBe(true);
+    expect(state.fileName).toBeNull();
+  });
+
+  it('supplies the file name once the source has resolved', async () => {
+    const renderLoading = vi.fn((_state: SheetViewerLoadingState) => <div />);
+    render(
+      <SheetViewer
+        source={createCsvFile(sampleCsv, 'people.csv')}
+        height={600}
+        width={800}
+        renderLoading={renderLoading}
+      />
+    );
+
+    await waitFor(() => {
+      const named = renderLoading.mock.calls.some(([state]) => state.fileName === 'people.csv');
+      expect(named).toBe(true);
+    });
+  });
+
+  it('shows nothing when the renderer returns null', () => {
+    render(
+      <SheetViewer
+        source={createCsvFile(sampleCsv)}
+        height={600}
+        width={800}
+        renderLoading={() => null}
+      />
+    );
+
+    expect(document.querySelector('.sv-loading-overlay')?.childNodes.length ?? 0).toBe(0);
+  });
+
+  it('removes the loading UI once parsing finishes', async () => {
+    const ref = createRef<SheetViewerHandle>();
+    render(
+      <SheetViewer
+        ref={ref}
+        source={createCsvFile(sampleCsv)}
+        height={600}
+        width={800}
+        renderLoading={() => <div data-testid="custom-loader" />}
+      />
+    );
+    await multiSheetHelper(ref);
+
+    await waitFor(() => { expect(screen.queryByTestId('custom-loader')).toBeNull(); });
+  });
 });
