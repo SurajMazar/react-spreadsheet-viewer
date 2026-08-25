@@ -10,6 +10,7 @@ import Cell from './Cell';
 import EditableCell from './EditableCell';
 import ChartOverlays from '../ChartOverlays';
 import { evaluateConditionalFormats } from '../../conditionalFormat/evaluator';
+import { ALL_KEYBOARD_INTERACTIONS, type ResolvedKeyboardConfig } from '../../utils/keyboard';
 import type { MergeCell, CellStyle, CellValueChange, CellStyleChange, ParsedGridLineConfig, HighlightAreaAttributes } from '../../types';
 
 /** Base geometry, in unzoomed pixels. Every rendered size derives from these. */
@@ -38,6 +39,8 @@ interface VirtualGridProps {
   gridApiRef?: MutableRefObject<VirtualGridApi | null>;
   parsedGridLines?: ParsedGridLineConfig[];
   tabNavigation?: boolean;
+  /** Which document-level keyboard groups are live, already resolved by SheetViewer. */
+  keyboard?: ResolvedKeyboardConfig;
 }
 
 export default function VirtualGrid({
@@ -49,6 +52,7 @@ export default function VirtualGrid({
   gridApiRef,
   parsedGridLines,
   tabNavigation = true,
+  keyboard = ALL_KEYBOARD_INTERACTIONS,
 }: VirtualGridProps) {
   const activeSheet = useViewerStore((s) => s.activeSheet);
   const sheetData = useViewerStore((s) => (s.activeSheet ? s.sheets[s.activeSheet] : null));
@@ -379,6 +383,9 @@ export default function VirtualGrid({
 
   // Keyboard navigation
   useEffect(() => {
+    // Nothing this effect handles is enabled — never even listen.
+    if (!keyboard.navigation && !keyboard.editing) return;
+
     const handleKeyDown = (e: globalThis.KeyboardEvent) => {
       if (!activeCell || !sheetData) return;
       const target = e.target as HTMLElement;
@@ -390,46 +397,55 @@ export default function VirtualGrid({
 
       switch (e.key) {
         case 'ArrowUp':
+          if (!keyboard.navigation) return;
           newRow = Math.max(0, newRow - 1);
           break;
         case 'ArrowDown':
+          if (!keyboard.navigation) return;
           newRow = Math.min(effectiveRows - 1, newRow + 1);
           break;
         case 'ArrowLeft':
+          if (!keyboard.navigation) return;
           newCol = Math.max(0, newCol - 1);
           break;
         case 'ArrowRight':
+          if (!keyboard.navigation) return;
           newCol = Math.min(effectiveCols - 1, newCol + 1);
           break;
         case 'Tab':
-          if (!tabNavigation) return;
+          if (!keyboard.navigation || !tabNavigation) return;
           e.preventDefault();
           newCol = e.shiftKey
             ? Math.max(0, newCol - 1)
             : Math.min(effectiveCols - 1, newCol + 1);
           break;
         case 'Enter':
-          if (mode === 'edit' && !editingCell) {
+          if (keyboard.editing && mode === 'edit' && !editingCell) {
             e.preventDefault();
             setEditingCell({ row: activeCell.row, col: activeCell.col });
             return;
           }
+          if (!keyboard.navigation) return;
           newRow = Math.min(effectiveRows - 1, newRow + 1);
           break;
         case 'Home':
+          if (!keyboard.navigation) return;
           newCol = 0;
           if (e.ctrlKey) newRow = 0;
           break;
         case 'End':
+          if (!keyboard.navigation) return;
           newCol = dataCols - 1;
           if (e.ctrlKey) newRow = dataRows - 1;
           break;
         case 'F2':
+          if (!keyboard.editing) return;
           if (mode === 'edit') {
             e.preventDefault();
             setEditingCell({ row: activeCell.row, col: activeCell.col });
             return;
           }
+          if (!keyboard.navigation) return;
           break;
         default:
           return;
@@ -447,10 +463,12 @@ export default function VirtualGrid({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activeCell, sheetData, activeSheet, setActiveCell, setSelectionRanges, setProgrammaticHighlight, effectiveRows, effectiveCols, dataRows, dataCols, mode, editingCell]);
+  }, [activeCell, sheetData, activeSheet, setActiveCell, setSelectionRanges, setProgrammaticHighlight, effectiveRows, effectiveCols, dataRows, dataCols, mode, editingCell, keyboard]);
 
   // Copy/Paste handlers (Ctrl+C / Ctrl+V / Cmd+C / Cmd+V) and Escape to clear copy indicator
   useEffect(() => {
+    if (!keyboard.clipboard && !keyboard.history) return;
+
     const handleCopyPaste = (e: globalThis.KeyboardEvent) => {
       if (!sheetData) return;
       const target = e.target as HTMLElement;
@@ -459,7 +477,7 @@ export default function VirtualGrid({
 
       // Escape clears the copy indicator
       if (e.key === 'Escape') {
-        setCopiedRange(null);
+        if (keyboard.clipboard) setCopiedRange(null);
         return;
       }
 
@@ -467,18 +485,20 @@ export default function VirtualGrid({
       if (!isMod) return;
 
       // Undo: Ctrl+Z
-      if (e.key === 'z' && !e.shiftKey) {
+      if (keyboard.history && e.key === 'z' && !e.shiftKey) {
         e.preventDefault();
         undo();
         return;
       }
 
       // Redo: Ctrl+Y or Ctrl+Shift+Z
-      if (e.key === 'y' || (e.key === 'z' && e.shiftKey) || (e.key === 'Z' && e.shiftKey)) {
+      if (keyboard.history && (e.key === 'y' || (e.key === 'z' && e.shiftKey) || (e.key === 'Z' && e.shiftKey))) {
         e.preventDefault();
         redo();
         return;
       }
+
+      if (!keyboard.clipboard) return;
 
       if (e.key === 'c') {
         e.preventDefault();
@@ -535,7 +555,7 @@ export default function VirtualGrid({
 
     window.addEventListener('keydown', handleCopyPaste);
     return () => window.removeEventListener('keydown', handleCopyPaste);
-  }, [sheetData, activeCell, ranges, mode, activeSheet, editingCell, setCellValue, setCellStyle, setCopiedRange, pushUndo, undo, redo]);
+  }, [sheetData, activeCell, ranges, mode, activeSheet, editingCell, setCellValue, setCellStyle, setCopiedRange, pushUndo, undo, redo, keyboard]);
 
   // Build a merge lookup map: "row,col" → MergeCell for quick cell-level checks
   const mergeMap = useMemo(() => {
@@ -832,7 +852,7 @@ export default function VirtualGrid({
                     col={col}
                     value={value}
                     validation={cellValidation}
-                    tabNavigation={tabNavigation}
+                    tabNavigation={tabNavigation && keyboard.navigation}
                     style={{
                       position: 'absolute',
                       top: vr.start,

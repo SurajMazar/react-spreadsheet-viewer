@@ -236,6 +236,8 @@ interface SheetViewerProps {
   downloadable?: boolean;        // Show download button
   chartable?: boolean;           // Show Charts button in toolbar (default: true)
   searchable?: boolean;          // Enable Ctrl+F search (default: true)
+  tabNavigation?: boolean;       // Tab/Shift+Tab move between cells (default: true)
+  keyboardInteractions?: boolean | SheetViewerKeyboardConfig;  // Disable keyboard handling, wholly or by group (default: true)
   height?: number | string;      // Container height
   width?: number | string;       // Container width
   className?: string;            // Extra CSS class
@@ -536,6 +538,7 @@ npm publish --otp=<code>    # Requires 2FA OTP from authenticator app
 | `src/lib/SheetViewer.tsx` | ~280 | Root component with forwardRef (theme vars, gridLines parsing, cellInfo callback) |
 | `src/lib/context/ViewerContext.tsx` | ~230 | Zustand store + provider (incl. searchMatches, searchActiveIndex) |
 | `src/lib/hooks/useSourceLoader.ts` | ~75 | Source → ArrayBuffer normalization |
+| `src/lib/hooks/useKeyboardLockdown.ts` | ~120 | Takes the viewer off the keyboard when `navigation` is disabled |
 | `src/lib/hooks/useFileParser.ts` | ~297 | Buffer → parsed sheet data |
 | `src/lib/components/Grid/VirtualGrid.tsx` | ~550 | Virtualized grid (main render, merge handling, copy/paste, scroll fixes) |
 | `src/lib/components/Grid/Cell.tsx` | ~135 | Read-only cell (highlight colors, search match, grid lines, data-cell attr) |
@@ -553,6 +556,7 @@ npm publish --otp=<code>    # Requires 2FA OTP from authenticator app
 | `src/lib/utils/rangeParser.ts` | ~185 | Excel reference parsing |
 | `src/lib/utils/zoom.ts` | ~85 | Zoom clamping, level stepping, label formatting, pixel scaling |
 | `src/lib/utils/autoFit.ts` | ~180 | Canvas text measurement + per-column auto-fit width |
+| `src/lib/utils/keyboard.ts` | ~60 | Normalizes `keyboardInteractions` into one flat set of group flags |
 | `src/lib/utils/columnWidths.ts` | ~100 | SheetJS `!cols` → pixel widths (wpx/wch/width, clamped) |
 | `src/lib/utils/clipboard.ts` | ~147 | TSV copy/paste utilities for Excel-compatible clipboard |
 | `src/lib/utils/download.ts` | ~60 | XLSX/CSV export |
@@ -610,6 +614,11 @@ These features were added after the initial release:
 
 ### Zoom
 Dropdown at the start of the formula bar row (`ZoomControl`, hosted by `FormulaBar`) plus Ctrl/Cmd + wheel over the grid, backed by `zoom` / `zoomLevels` / `minZoom` / `maxZoom` / `onZoomChange` props and `getZoom`/`setZoom`/`zoomIn`/`zoomOut`/`resetZoom` on the handle. Store state lives in `ViewerContext`; the maths is in `src/lib/utils/zoom.ts`. `zoomIn`/`zoomOut` walk the `zoomLevels` ladder and stop at its ends — `minZoom`/`maxZoom` bound `setZoom`, they are not extra rungs, so stepping never lands on a level the picker does not offer. See §10 for why it scales geometry rather than transforming.
+
+### Disabling Keyboard Interactions
+`keyboardInteractions` (`boolean | SheetViewerKeyboardConfig`) switches the viewer's keyboard handling off wholesale or per group — `navigation`, `editing`, `clipboard`, `history`, `search`. `src/lib/utils/keyboard.ts` flattens the union into five booleans, `SheetViewer` keeps that object referentially stable (an inline literal would otherwise re-bind the grid's key listeners every render), and the flags gate the two `window` keydown effects in `VirtualGrid` plus `SearchBar`'s Ctrl+F.
+
+Blocking the viewer's own handlers is not enough to make the grid inert, so `navigation: false` additionally runs `useKeyboardLockdown`: it swallows the keys the browser acts on by itself (arrows, Page keys, Home/End, Space scroll the grid whenever focus sits inside the viewer) and stamps `tabindex="-1"` on every focusable descendant, maintained by a `MutationObserver` over added nodes so late-mounted controls — search bar, chart panel, cell editor — are covered too. Scoping matters in both directions: key events aimed outside the viewer are left alone so the host page still scrolls, text-entry targets are skipped so the caret still moves inside the cell editor, and nothing traps focus (Tab from inside moves on past the viewer). Originals are restored on cleanup, so toggling the prop back on returns the tab order.
 
 ### Excel Column Width Preservation
 `XLSX.read` now passes `cellStyles: true` so `!cols` is populated, and `src/lib/utils/columnWidths.ts` converts it to pixels. See §10.

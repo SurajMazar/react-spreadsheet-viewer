@@ -1368,3 +1368,210 @@ describe('SheetViewer — renderLoading', () => {
     await waitFor(() => { expect(screen.queryByTestId('custom-loader')).toBeNull(); });
   });
 });
+
+// =============================================
+// keyboardInteractions
+// =============================================
+describe('SheetViewer — keyboardInteractions', () => {
+  const pressKey = (key: string, init: KeyboardEventInit = {}) => {
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, ...init }));
+    });
+  };
+
+  const renderViewer = async (props: Partial<React.ComponentProps<typeof SheetViewer>> = {}) => {
+    const ref = createRef<SheetViewerHandle>();
+    render(
+      <SheetViewer
+        ref={ref}
+        source={createCsvFile(sampleCsv)}
+        height={600}
+        width={800}
+        {...props}
+      />
+    );
+    await multiSheetHelper(ref);
+    act(() => { ref.current?.setHighlight('A1'); });
+    return ref;
+  };
+
+  it('moves the active cell with the arrow keys by default', async () => {
+    const ref = await renderViewer();
+    pressKey('ArrowDown');
+    expect(ref.current?.getHighlight()).toBe('A2');
+  });
+
+  it('ignores the arrow keys when keyboardInteractions is false', async () => {
+    const ref = await renderViewer({ keyboardInteractions: false });
+    pressKey('ArrowDown');
+    pressKey('ArrowRight');
+    expect(ref.current?.getHighlight()).toBe('A1');
+  });
+
+  it('ignores Tab/Home/End/Enter when keyboardInteractions is false', async () => {
+    const ref = await renderViewer({ keyboardInteractions: false });
+    pressKey('Tab');
+    pressKey('Enter');
+    pressKey('End');
+    pressKey('Home');
+    expect(ref.current?.getHighlight()).toBe('A1');
+  });
+
+  it('disables only navigation when the object turns that group off', async () => {
+    const ref = await renderViewer({ keyboardInteractions: { navigation: false } });
+    pressKey('ArrowDown');
+    expect(ref.current?.getHighlight()).toBe('A1');
+  });
+
+  it('keeps navigation working when an unrelated group is turned off', async () => {
+    const ref = await renderViewer({ keyboardInteractions: { clipboard: false } });
+    pressKey('ArrowDown');
+    expect(ref.current?.getHighlight()).toBe('A2');
+  });
+
+  it('does not open the search bar on Ctrl+F when search is disabled', async () => {
+    await renderViewer({ keyboardInteractions: { search: false } });
+    pressKey('f', { ctrlKey: true });
+    await waitFor(() => {
+      expect(document.querySelector('.sv-search-bar')).toBeNull();
+    });
+  });
+
+  it('opens the search bar on Ctrl+F by default', async () => {
+    await renderViewer();
+    pressKey('f', { ctrlKey: true });
+    await waitFor(() => {
+      expect(document.querySelector('.sv-search-bar')).toBeTruthy();
+    });
+  });
+
+  it('does not copy on Ctrl+C when the clipboard group is disabled', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } });
+
+    await renderViewer({ keyboardInteractions: { clipboard: false } });
+    pressKey('c', { ctrlKey: true });
+    await waitFor(() => { expect(writeText).not.toHaveBeenCalled(); });
+  });
+
+  it('copies on Ctrl+C by default', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } });
+
+    await renderViewer();
+    pressKey('c', { ctrlKey: true });
+    await waitFor(() => { expect(writeText).toHaveBeenCalled(); });
+  });
+
+  it('takes the viewer\'s controls out of the tab order when navigation is off', async () => {
+    await renderViewer({ keyboardInteractions: false, downloadable: true });
+
+    const controls = document.querySelectorAll<HTMLElement>('.sheet-viewer button, .sheet-viewer input');
+    expect(controls.length).toBeGreaterThan(0);
+    controls.forEach((el) => { expect(el.getAttribute('tabindex')).toBe('-1'); });
+  });
+
+  it('keeps the controls tabbable by default', async () => {
+    await renderViewer({ downloadable: true });
+
+    const controls = document.querySelectorAll<HTMLElement>('.sheet-viewer button, .sheet-viewer input');
+    expect(controls.length).toBeGreaterThan(0);
+    controls.forEach((el) => { expect(el.getAttribute('tabindex')).toBeNull(); });
+  });
+
+  it('restores the tab order when navigation is switched back on', async () => {
+    const ref = createRef<SheetViewerHandle>();
+    const source = createCsvFile(sampleCsv);
+    const { rerender } = render(
+      <SheetViewer ref={ref} source={source} height={600} width={800} keyboardInteractions={false} />
+    );
+    await multiSheetHelper(ref);
+    expect(document.querySelector('.sheet-viewer button')?.getAttribute('tabindex')).toBe('-1');
+
+    rerender(<SheetViewer ref={ref} source={source} height={600} width={800} />);
+    await waitFor(() => {
+      expect(document.querySelector('.sheet-viewer button')?.getAttribute('tabindex')).toBeNull();
+    });
+  });
+
+  it('blocks the browser from scrolling the grid with the keyboard', async () => {
+    await renderViewer({ keyboardInteractions: false });
+    const grid = document.querySelector('.sv-grid-scroll')!;
+
+    for (const key of ['ArrowDown', 'PageDown', 'Home', ' ']) {
+      const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
+      act(() => { grid.dispatchEvent(event); });
+      expect(event.defaultPrevented).toBe(true);
+    }
+  });
+
+  it('leaves the host page\'s own keyboard scrolling alone', async () => {
+    await renderViewer({ keyboardInteractions: false });
+
+    // Aimed at the page rather than the viewer: the browser is scrolling the
+    // host document, which is none of the viewer's business.
+    const event = new KeyboardEvent('keydown', { key: 'PageDown', bubbles: true, cancelable: true });
+    act(() => { document.body.dispatchEvent(event); });
+    expect(event.defaultPrevented).toBe(false);
+  });
+
+  it('still lets the caret move inside the viewer\'s own inputs', async () => {
+    await renderViewer({ keyboardInteractions: false });
+    const input = document.querySelector<HTMLInputElement>('.sv-formula-bar-range-input')!;
+    act(() => { input.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); });
+
+    const event = new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true, cancelable: true });
+    act(() => { input.dispatchEvent(event); });
+    expect(event.defaultPrevented).toBe(false);
+  });
+
+  it('does not touch the tab order or scrolling when only clipboard is disabled', async () => {
+    await renderViewer({ keyboardInteractions: { clipboard: false } });
+    expect(document.querySelector('.sheet-viewer button')?.getAttribute('tabindex')).toBeNull();
+
+    const grid = document.querySelector('.sv-grid-scroll')!;
+    const event = new KeyboardEvent('keydown', { key: 'PageDown', bubbles: true, cancelable: true });
+    act(() => { grid.dispatchEvent(event); });
+    expect(event.defaultPrevented).toBe(false);
+  });
+
+  it('locks down controls that appear after the viewer has mounted', async () => {
+    // Search still has its shortcut here, so the bar can be opened and checked.
+    await renderViewer({ keyboardInteractions: { navigation: false } });
+    pressKey('f', { ctrlKey: true });
+
+    await waitFor(() => {
+      const input = document.querySelector<HTMLInputElement>('.sv-search-bar input');
+      expect(input).toBeTruthy();
+      expect(input?.getAttribute('tabindex')).toBe('-1');
+    });
+  });
+
+  it('accepts an inline object without re-binding on every render', async () => {
+    const ref = createRef<SheetViewerHandle>();
+    const { rerender } = render(
+      <SheetViewer
+        ref={ref}
+        source={createCsvFile(sampleCsv)}
+        height={600}
+        width={800}
+        keyboardInteractions={{ navigation: false }}
+      />
+    );
+    await multiSheetHelper(ref);
+    act(() => { ref.current?.setHighlight('A1'); });
+
+    rerender(
+      <SheetViewer
+        ref={ref}
+        source={createCsvFile(sampleCsv)}
+        height={600}
+        width={800}
+        keyboardInteractions={{ navigation: false }}
+      />
+    );
+
+    pressKey('ArrowDown');
+    expect(ref.current?.getHighlight()).toBe('A1');
+  });
+});

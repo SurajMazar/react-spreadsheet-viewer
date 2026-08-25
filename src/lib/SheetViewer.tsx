@@ -2,9 +2,11 @@ import React, { useCallback, useEffect, useMemo, useRef as useReactRef, forwardR
 import { ViewerProvider, useViewerStore, useViewerStoreApi } from './context/ViewerContext';
 import { useSourceLoader } from './hooks/useSourceLoader';
 import { useFileParser } from './hooks/useFileParser';
+import { useKeyboardLockdown } from './hooks/useKeyboardLockdown';
 import { parseRangeExpression } from './utils/rangeParser';
 import { DEFAULT_ZOOM } from './utils/zoom';
 import { computeAutoFitWidth, createCanvasTextMeasurer, resolveAutoFitFont } from './utils/autoFit';
+import { ALL_KEYBOARD_INTERACTIONS, isSameKeyboardConfig, resolveKeyboardConfig } from './utils/keyboard';
 import VirtualGrid, { type VirtualGridApi } from './components/Grid/VirtualGrid';
 import Toolbar from './components/Toolbar';
 import FormulaBar from './components/FormulaBar';
@@ -74,6 +76,7 @@ function SheetViewerInner({
   chartable = true,
   searchable = true,
   tabNavigation = true,
+  keyboardInteractions = true,
   height = '100%',
   width = '100%',
   className = '',
@@ -97,11 +100,27 @@ function SheetViewerInner({
   const setZoom = useViewerStore((s) => s.setZoom);
   const setZoomConfig = useViewerStore((s) => s.setZoomConfig);
 
+  /**
+   * One flat set of keyboard flags, kept referentially stable while the flags
+   * themselves don't change — an inline object literal for the prop would
+   * otherwise re-bind the grid's key listeners on every render.
+   */
+  const keyboardRef = useReactRef(ALL_KEYBOARD_INTERACTIONS);
+  const resolvedKeyboard = resolveKeyboardConfig(keyboardInteractions);
+  if (!isSameKeyboardConfig(keyboardRef.current, resolvedKeyboard)) {
+    keyboardRef.current = resolvedKeyboard;
+  }
+  const keyboard = keyboardRef.current;
+
   // Flag to suppress onSelectionChange for silent setHighlight calls
   const suppressSelectionCb = useReactRef(false);
 
   // Root element, so getHighlightElement() stays scoped to this viewer instance
   const rootRef = useReactRef<HTMLDivElement>(null);
+
+  // With navigation off, also deny the browser its own keyboard moves inside
+  // the viewer: scrolling the grid, and tabbing into the viewer's controls.
+  useKeyboardLockdown(rootRef, !keyboard.navigation);
 
   // VirtualGrid owns the scroll container; this is how the handle reaches it
   const gridApiRef = useReactRef<VirtualGridApi | null>(null);
@@ -520,8 +539,9 @@ function SheetViewerInner({
                 gridApiRef={gridApiRef}
                 parsedGridLines={parsedGridLines.length > 0 ? parsedGridLines : undefined}
                 tabNavigation={tabNavigation}
+                keyboard={keyboard}
               />
-              {searchable && <SearchBar />}
+              {searchable && <SearchBar shortcutsEnabled={keyboard.search} />}
             </div>
             {chartable && <ChartPanel />}
           </div>
