@@ -1368,3 +1368,90 @@ describe('SheetViewer — renderLoading', () => {
     await waitFor(() => { expect(screen.queryByTestId('custom-loader')).toBeNull(); });
   });
 });
+
+// =============================================
+// Frozen header ↔ scroll sync
+// =============================================
+describe('SheetViewer — header scroll sync', () => {
+  /** Move the grid's scroll container and let the listeners react. */
+  async function scrollGrid(left: number, top = 0) {
+    const scroller = document.querySelector('.sv-grid-scroll') as HTMLElement;
+    expect(scroller).toBeTruthy();
+    scroller.scrollLeft = left;
+    scroller.scrollTop = top;
+    await act(async () => {
+      scroller.dispatchEvent(new Event('scroll'));
+    });
+    return scroller;
+  }
+
+  const colHeaderTransform = () =>
+    (document.querySelector('.sv-col-headers-inner') as HTMLElement).style.transform;
+  const rowHeaderTransform = () =>
+    (document.querySelector('.sv-row-headers-inner') as HTMLElement).style.transform;
+
+  it('offsets the column headers by the horizontal scroll position', async () => {
+    const ref = createRef<SheetViewerHandle>();
+    render(<SheetViewer ref={ref} source={createCsvFile(sampleCsv)} height={600} width={800} />);
+    await multiSheetHelper(ref);
+
+    await scrollGrid(340);
+
+    expect(colHeaderTransform()).toBe('translate3d(-340px, 0, 0)');
+  });
+
+  it('offsets the row headers by the vertical scroll position', async () => {
+    const ref = createRef<SheetViewerHandle>();
+    render(<SheetViewer ref={ref} source={createCsvFile(sampleCsv)} height={600} width={800} />);
+    await multiSheetHelper(ref);
+
+    await scrollGrid(0, 88);
+
+    expect(rowHeaderTransform()).toBe('translate3d(0, -88px, 0)');
+  });
+
+  it('tracks the scroll position without re-rendering the grid body', async () => {
+    // Header sync used to run through React state, so every scroll event
+    // re-rendered every visible cell. The cells must stay untouched now.
+    const ref = createRef<SheetViewerHandle>();
+    render(<SheetViewer ref={ref} source={createCsvFile(sampleCsv)} height={600} width={800} />);
+    await multiSheetHelper(ref);
+
+    const cellBefore = document.querySelector('.sv-cell[data-cell]');
+    await scrollGrid(120);
+    const cellAfter = document.querySelector('.sv-cell[data-cell]');
+
+    expect(colHeaderTransform()).toBe('translate3d(-120px, 0, 0)');
+    // Same DOM node, i.e. React did not reconcile the grid body for the scroll.
+    expect(cellAfter).toBe(cellBefore);
+  });
+
+  it('still syncs the headers when the grid mounts after an unknown activeSheet', async () => {
+    // Regression: a controlled `activeSheet` naming a sheet that is not loaded
+    // yet makes VirtualGrid render nothing on its first pass. The scroll
+    // listener used to be bound in an effect with an empty dependency list, so
+    // it bound to a null node and never bound again — the headers stayed frozen
+    // for the rest of the session once the real sheet name arrived.
+    const ref = createRef<SheetViewerHandle>();
+    // One File instance across both renders: a fresh one would re-trigger the
+    // whole load, remounting the grid and hiding what this test is checking.
+    const file = createCsvFile(sampleCsv);
+    const { rerender } = render(
+      <SheetViewer ref={ref} source={file} activeSheet="NotASheet" height={600} width={800} />
+    );
+    await multiSheetHelper(ref);
+
+    // Nothing to scroll while the active sheet does not resolve to any data.
+    expect(document.querySelector('.sv-grid-scroll')).toBeNull();
+
+    const realSheet = ref.current!.getSheetNames()[0];
+    rerender(
+      <SheetViewer ref={ref} source={file} activeSheet={realSheet} height={600} width={800} />
+    );
+    await waitFor(() => { expect(document.querySelector('.sv-grid-scroll')).toBeTruthy(); });
+
+    await scrollGrid(275);
+
+    expect(colHeaderTransform()).toBe('translate3d(-275px, 0, 0)');
+  });
+});
