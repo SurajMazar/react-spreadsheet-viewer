@@ -10,6 +10,7 @@ import Cell from './Cell';
 import EditableCell from './EditableCell';
 import ChartOverlays from '../ChartOverlays';
 import { evaluateConditionalFormats } from '../../conditionalFormat/evaluator';
+import { useHeaderScrollSync } from '../../hooks/useHeaderScrollSync';
 import type { MergeCell, CellStyle, CellValueChange, CellStyleChange, ParsedGridLineConfig, HighlightAreaAttributes } from '../../types';
 
 /** Base geometry, in unzoomed pixels. Every rendered size derives from these. */
@@ -79,41 +80,61 @@ export default function VirtualGrid({
   );
   const ranges = currentSelection.ranges ?? EMPTY_RANGES;
 
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const colHeadersInnerRef = useRef<HTMLDivElement | null>(null);
+  const rowHeadersInnerRef = useRef<HTMLDivElement | null>(null);
   const isSelecting = useRef(false);
   const selectionStart = useRef<{ row: number; col: number } | null>(null);
   const [editingCell, setEditingCell] = useState<EditingCell | null>(null);
   const [containerSize, setContainerSize] = useState({ width: 800, height: 600 });
-  const [scrollOffset, setScrollOffset] = useState({ top: 0, left: 0 });
+
+  // The scroll node is tracked in state as well as in a ref so that the
+  // listener effects below re-run when it actually enters the DOM. This
+  // component renders nothing while `sheetData` is missing — which happens for
+  // a controlled `activeSheet` naming a sheet that has not loaded yet — and a
+  // plain mount effect would in that case bind to a null node and, with an
+  // empty dependency list, never bind again: frozen headers, dead Shift+wheel
+  // and a container size stuck at its 800x600 placeholder for the whole
+  // lifetime of the viewer.
+  const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
+  const setScrollNode = useCallback((node: HTMLDivElement | null) => {
+    scrollRef.current = node;
+    setScrollEl(node);
+  }, []);
+
+  const syncHeaders = useHeaderScrollSync(scrollEl, colHeadersInnerRef, rowHeadersInnerRef);
 
   // Measure the container
   useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
+    if (!scrollEl) return;
+    // ResizeObserver is missing on browsers old enough to matter here (legacy
+    // Edge, Safari < 13.1). Falling back to window resize loses container
+    // changes that are not window changes, but it keeps the viewer working
+    // instead of throwing out of this effect and tearing down the tree.
+    if (typeof ResizeObserver === 'undefined') {
+      const onResize = () => {
+        const { clientWidth, clientHeight } = scrollEl;
+        if (clientWidth > 0 && clientHeight > 0) {
+          setContainerSize({ width: clientWidth, height: clientHeight });
+        }
+      };
+      onResize();
+      window.addEventListener('resize', onResize);
+      return () => window.removeEventListener('resize', onResize);
+    }
     const obs = new ResizeObserver((entries) => {
       const { width, height } = entries[0].contentRect;
       if (width > 0 && height > 0) {
         setContainerSize({ width, height });
       }
     });
-    obs.observe(el);
+    obs.observe(scrollEl);
     return () => obs.disconnect();
-  }, []);
-
-  // Keep scroll offset in sync for header positioning
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const onScroll = () => {
-      setScrollOffset({ top: el.scrollTop, left: el.scrollLeft });
-    };
-    el.addEventListener('scroll', onScroll, { passive: true });
-    return () => el.removeEventListener('scroll', onScroll);
-  }, []);
+  }, [scrollEl]);
 
   // Horizontal scroll: Shift+wheel and prevent parent scroll capture in nested containers
   useEffect(() => {
-    const el = scrollRef.current;
+    const el = scrollEl;
     if (!el) return;
 
     const handleWheel = (e: WheelEvent) => {
@@ -141,7 +162,7 @@ export default function VirtualGrid({
 
     el.addEventListener('wheel', handleWheel, { passive: false });
     return () => el.removeEventListener('wheel', handleWheel);
-  }, [zoomIn, zoomOut]);
+  }, [scrollEl, zoomIn, zoomOut]);
 
   const dataCols = sheetData?.cols || 0;
   const dataRows = sheetData?.rows || 0;
@@ -214,6 +235,15 @@ export default function VirtualGrid({
   useEffect(() => {
     rowVirtualizer.measure();
   }, [rowHeights, zoom, rowVirtualizer]);
+
+  // The header transform lives outside React's style diffing, so a re-render
+  // that rebuilds the header bands leaves it untouched — except on the render
+  // that first creates those nodes, which start out at translate zero. Push the
+  // current offsets back in after any geometry change so a zoom or a resize
+  // performed while scrolled cannot leave the headers parked at the origin.
+  useEffect(() => {
+    syncHeaders();
+  }, [syncHeaders, zoom, colWidths, rowHeights, effectiveCols, effectiveRows]);
 
   // Auto-scroll to selection only when the full range is not visible in the viewport
   useEffect(() => {
@@ -688,13 +718,17 @@ export default function VirtualGrid({
           height: colHeaderHeight,
         }}
       >
+        {/* No `transform` here on purpose: useHeaderScrollSync writes it
+            directly to this node every frame of a scroll. Putting it in this
+            style object would hand it back to React's diffing and reintroduce a
+            full grid re-render per scroll event. */}
         <div
+          ref={colHeadersInnerRef}
           className="sv-col-headers-inner"
           style={{
             width: colVirtualizer.getTotalSize(),
             height: '100%',
             position: 'relative',
-            transform: `translateX(-${scrollOffset.left}px)`,
           }}
         >
           {virtualCols.map((vc) => (
@@ -731,12 +765,12 @@ export default function VirtualGrid({
         }}
       >
         <div
+          ref={rowHeadersInnerRef}
           className="sv-row-headers-inner"
           style={{
             height: rowVirtualizer.getTotalSize(),
             width: '100%',
             position: 'relative',
-            transform: `translateY(-${scrollOffset.top}px)`,
           }}
         >
           {virtualRows.map((vr) => (
@@ -763,7 +797,7 @@ export default function VirtualGrid({
 
       {/* Main scrollable grid area */}
       <div
-        ref={scrollRef}
+        ref={setScrollNode}
         className="sv-grid-scroll"
         style={{
           position: 'absolute',
