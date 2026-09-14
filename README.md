@@ -147,6 +147,8 @@ The `source` prop accepts multiple formats:
 | `downloadable` | `boolean` | `false` | Show a download button in the toolbar |
 | `chartable` | `boolean` | `true` | Show Charts button in toolbar |
 | `searchable` | `boolean` | `true` | Enable Ctrl+F search |
+| `tabNavigation` | `boolean` | `true` | Enable Tab / Shift+Tab to move between cells |
+| `keyboardInteractions` | `boolean \| SheetViewerKeyboardConfig` | `true` | Turn the viewer's keyboard shortcuts and grid navigation off, all at once or by group. See [Keyboard interactions](#keyboard-interactions) |
 | `height` | `number \| string` | `'100%'` | Container height (px or CSS value) |
 | `width` | `number \| string` | `'100%'` | Container width (px or CSS value) |
 | `className` | `string` | `''` | Additional CSS class on the root element |
@@ -574,6 +576,64 @@ if (ref.current?.canRedo()) ref.current.redo();
 
 ---
 
+## Keyboard interactions
+
+By default the viewer listens on the document for the shortcuts and navigation keys
+listed above. `keyboardInteractions` turns that off — useful when the viewer is
+embedded in a page or modal that owns those keys itself.
+
+```tsx
+// Nothing the viewer handles at the document level fires
+<SheetViewer source={file} keyboardInteractions={false} />
+```
+
+Pass an object to disable individual groups and leave the rest working:
+
+```tsx
+// Arrows and Enter still move the active cell; the app keeps Ctrl+F and Ctrl+Z
+<SheetViewer
+  source={file}
+  keyboardInteractions={{ clipboard: false, history: false, search: false }}
+/>
+```
+
+| Group | Default | Keys |
+| --- | --- | --- |
+| `navigation` | `true` | Arrow keys, Tab / Shift+Tab, Enter, Home, End — plus everything the browser would do by itself, see below |
+| `editing` | `true` | Enter and F2 to open the cell editor (edit mode only) |
+| `clipboard` | `true` | Ctrl/Cmd+C, Ctrl/Cmd+V, Escape to clear the copy marquee |
+| `history` | `true` | Ctrl/Cmd+Z, Ctrl/Cmd+Y, Ctrl/Cmd+Shift+Z |
+| `search` | `true` | Ctrl/Cmd+F to open search, Escape to close it |
+
+Turning `navigation` off also takes away the two keyboard moves the viewer does
+not handle itself, so the grid really is inert under the keyboard:
+
+- **The browser's own scrolling.** With focus inside the viewer, arrow keys, Page
+  keys, Home/End and Space scroll the grid as a default action, with no handler of
+  the viewer's involved. Those keys are swallowed. Key presses aimed at the page
+  outside the viewer are left alone — scrolling the host document stays the host
+  page's business.
+- **The tab order.** The viewer's buttons and inputs are given `tabindex="-1"`, so
+  Tab walks straight past the whole viewer instead of stepping through the toolbar,
+  sheet tabs, zoom picker and range box. Nothing is trapped: Tab from inside moves
+  on to the next control after the viewer, and mouse clicks still focus and operate
+  every control as before.
+
+Notes:
+
+- Typing inside the viewer's own inputs is never affected. Once the cell editor,
+  the range box, or the search box has focus, text entry works normally — arrow keys
+  move the caret, and Enter commits an edit — because the editor is opened by mouse
+  and would otherwise have no way to finish. This prop governs shortcuts, focus and
+  grid navigation, not text entry.
+- `tabNavigation` applies on top of `navigation`: Tab moves between cells, and
+  commits from the cell editor, only when both are enabled.
+- With `search: false` there is no way left to open the search bar, since Ctrl+F is
+  its only trigger. Mouse-driven behavior — click, drag-select, double-click to
+  edit, column resize, Ctrl+scroll zoom — is untouched either way.
+
+---
+
 ## Zoom
 
 A Google Sheets-style zoom picker sits at the start of the formula bar row. Users can also hold Ctrl/Cmd and scroll over the grid. Because it lives in the formula bar rather than the toolbar, `showToolbar={false}` does not hide it.
@@ -810,6 +870,7 @@ All types are exported:
 import type {
   SheetViewerProps,
   SheetViewerHandle,
+  SheetViewerKeyboardConfig,
   SheetViewerSource,
   SheetViewerMode,
   SheetViewerTheme,

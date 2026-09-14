@@ -8,7 +8,15 @@ interface SearchResult {
   value: unknown;
 }
 
-export default function SearchBar() {
+interface SearchBarProps {
+  /**
+   * Whether Ctrl/Cmd+F opens the bar and Escape closes it. When false there is
+   * no other way in, so the bar simply stays closed.
+   */
+  shortcutsEnabled?: boolean;
+}
+
+export default function SearchBar({ shortcutsEnabled = true }: SearchBarProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchResult[]>([]);
@@ -30,6 +38,8 @@ export default function SearchBar() {
   }, [setSearchMatches]);
 
   useEffect(() => {
+    if (!shortcutsEnabled) return;
+
     const handleKeyDown = (e: globalThis.KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
         e.preventDefault();
@@ -42,7 +52,7 @@ export default function SearchBar() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, clearSearch]);
+  }, [isOpen, clearSearch, shortcutsEnabled]);
 
   const navigateToResult = useCallback(
     (result: SearchResult | undefined, idx: number) => {

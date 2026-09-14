@@ -21,6 +21,7 @@ export type {
 export type {
   SheetViewerProps,
   SheetViewerHandle,
+  SheetViewerKeyboardConfig,
   SheetViewerLoadingState,
   SheetViewerToolsPlacement,
   SheetViewerSource,

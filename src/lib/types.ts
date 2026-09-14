@@ -338,6 +338,33 @@ export interface SheetViewerLoadingState {
   isFetching: boolean;
 }
 
+/**
+ * Per-group switches for the viewer's document-level keyboard handling.
+ *
+ * Every group defaults to enabled; listing one as `false` disables just that
+ * group. Groups are independent — turning off `editing` still lets the arrow
+ * keys move the active cell.
+ */
+export interface SheetViewerKeyboardConfig {
+  /**
+   * Arrow keys, Tab/Shift+Tab, Enter, Home and End move the active cell.
+   * Default: true.
+   *
+   * Turning this off also takes the viewer off the keyboard entirely: the
+   * browser's own scrolling of the grid is suppressed, and the viewer's
+   * controls leave the tab order so Tab walks past the whole component.
+   */
+  navigation?: boolean;
+  /** Enter and F2 open the cell editor (edit mode only). Default: true */
+  editing?: boolean;
+  /** Ctrl/Cmd+C, Ctrl/Cmd+V, and Escape to clear the copy marquee. Default: true */
+  clipboard?: boolean;
+  /** Ctrl/Cmd+Z and Ctrl/Cmd+Y (or Ctrl/Cmd+Shift+Z). Default: true */
+  history?: boolean;
+  /** Ctrl/Cmd+F opens search, Escape closes it. Default: true */
+  search?: boolean;
+}
+
 /** Props for the SheetViewer component */
 export interface SheetViewerProps {
   /** URL, File, ArrayBuffer, or TypedArray to load */
@@ -451,6 +478,24 @@ export interface SheetViewerProps {
   searchable?: boolean;
   /** Enable Tab key to navigate between cells (default: true) */
   tabNavigation?: boolean;
+  /**
+   * Keyboard interactions the viewer handles at the document level.
+   *
+   * `true` (default) enables all of them; `false` disables every one, so the
+   * viewer never reacts to a key press outside its own inputs. An object turns
+   * individual groups off while leaving the rest on:
+   *
+   * ```tsx
+   * <SheetViewer keyboardInteractions={false} />
+   * <SheetViewer keyboardInteractions={{ clipboard: false, history: false }} />
+   * ```
+   *
+   * Typing inside the viewer's own inputs — the cell editor, the range box and
+   * the search box — is never affected; this governs shortcuts, focus and grid
+   * navigation, not text entry. `tabNavigation` still applies on top of
+   * `navigation`.
+   */
+  keyboardInteractions?: boolean | SheetViewerKeyboardConfig;
   /** Container height (CSS value or number of pixels) */
   height?: number | string;
   /** Container width (CSS value or number of pixels) */
