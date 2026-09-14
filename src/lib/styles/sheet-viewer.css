@@ -568,6 +568,10 @@
 .sv-col-headers-inner {
   position: relative;
   height: 100%;
+  /* This node is the one that moves: useHeaderScrollSync writes a translate3d
+     here on every frame of a horizontal scroll. Hinting it keeps the header
+     band on the compositor instead of repainting the whole row each frame. */
+  will-change: transform;
 }
 
 .sv-col-header {
@@ -595,6 +599,8 @@
 .sv-row-headers-inner {
   position: relative;
   width: 100%;
+  /* See .sv-col-headers-inner — same transform, vertical axis. */
+  will-change: transform;
 }
 
 .sv-row-header {
@@ -677,7 +683,10 @@
 }
 
 .sv-grid-scroll {
-  will-change: transform;
+  /* No will-change here: nothing transforms this element, and promoting a
+     scroll container makes some engines take a slower path for it. The hint
+     belongs on the header inners, which really do animate a transform. */
+  -webkit-overflow-scrolling: touch;
 }
 
 .sv-grid-scroll::-webkit-scrollbar {
