@@ -158,6 +158,24 @@
   overflow: hidden;
 }
 
+/* In place of the grid, for a sheet over the parse limits */
+.sv-sheet-too-large {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--sv-color-bg);
+}
+
+.sv-sheet-too-large-text {
+  margin: 0;
+  color: var(--sv-color-text-muted);
+  font-size: var(--sv-font-size-md);
+  text-align: center;
+}
+
 /* ========================================
    Toolbar
    ======================================== */

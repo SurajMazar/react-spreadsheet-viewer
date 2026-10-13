@@ -1,7 +1,16 @@
 import { useCallback, useRef } from 'react';
 import { useViewerStore } from '../context/ViewerContext';
-import { buildColWidths, type ColInfo } from '../utils/columnWidths';
-import type { SheetData, CellValue } from '../types';
+import { exceedsSheetLimits, resolveSheetLimits, type ResolvedSheetLimits } from '../utils/sheetBounds';
+import { isBlankCsvRow, readCsvRows } from '../utils/csvParser';
+import { worksheetToSheetData } from '../utils/worksheetData';
+import type { SheetData, CellValue, SheetViewerLimits } from '../types';
+
+export interface FileParserOptions {
+  /** Per-sheet parse limits; defaults fill in anything left out. */
+  limits?: SheetViewerLimits;
+  /** Called with the error when parsing fails. */
+  onError?: (error: Error) => void;
+}
 
 /**
  * Hook to manage file parsing.
@@ -9,12 +18,19 @@ import type { SheetData, CellValue } from '../types';
  * Uses main-thread parsing with dynamic import() for xlsx.
  * requestAnimationFrame is used between steps to keep the UI responsive.
  */
-export function useFileParser(): { parseBuffer: (buffer: ArrayBuffer, fileName: string) => Promise<void> } {
+export function useFileParser(
+  options: FileParserOptions = {},
+): { parseBuffer: (buffer: ArrayBuffer, fileName: string) => Promise<void> } {
   const startParsing = useViewerStore((s) => s.startParsing);
   const setParseProgress = useViewerStore((s) => s.setParseProgress);
   const setFileData = useViewerStore((s) => s.setFileData);
   const setParseError = useViewerStore((s) => s.setParseError);
   const parsingRef = useRef(false);
+
+  // Read at parse time through a ref, so inline `limits`/`onError` values do
+  // not give parseBuffer a new identity every render (and re-trigger parsing).
+  const optionsRef = useRef(options);
+  optionsRef.current = options;
 
   const parseBuffer = useCallback(
     async (buffer: ArrayBuffer, fileName: string) => {
@@ -27,15 +43,18 @@ export function useFileParser(): { parseBuffer: (buffer: ArrayBuffer, fileName: 
         startParsing();
         await nextFrame();
 
+        const limits = resolveSheetLimits(optionsRef.current.limits);
         if (extension === 'csv') {
           const text = new TextDecoder().decode(buffer);
-          await parseCSVText(text, fileName, setParseProgress, setFileData);
+          await parseCSVText(text, fileName, limits, setParseProgress, setFileData);
         } else {
-          await parseExcelBuffer(buffer, fileName, setParseProgress, setFileData);
+          await parseExcelBuffer(buffer, fileName, limits, setParseProgress, setFileData);
         }
       } catch (err) {
         console.error('Parse error:', err);
-        setParseError((err as Error).message || 'Failed to parse file');
+        const error = err instanceof Error ? err : new Error(String(err));
+        setParseError(error.message || 'Failed to parse file');
+        optionsRef.current.onError?.(error);
       } finally {
         parsingRef.current = false;
       }
@@ -62,6 +81,7 @@ type SetFileDataFn = (payload: {
 async function parseExcelBuffer(
   buffer: ArrayBuffer,
   fileName: string,
+  limits: ResolvedSheetLimits,
   setParseProgress: SetProgressFn,
   setFileData: SetFileDataFn,
 ): Promise<void> {
@@ -96,62 +116,15 @@ async function parseExcelBuffer(
   for (let i = 0; i < totalSheets; i++) {
     const name = sheetNames[i];
     const worksheet = workbook.Sheets[name];
-    const ref = worksheet['!ref'];
 
-    if (!ref) {
+    if (!worksheet['!ref']) {
       sheets[name] = { data: [], cols: 0, rows: 0, merges: [], colWidths: [] };
       continue;
     }
 
-    const range = XLSX.utils.decode_range(ref);
-    const rangeStartRow = range.s.r;
-    const rangeStartCol = range.s.c;
-    const rangeEndRow = range.e.r;
-    const rangeEndCol = range.e.c;
-
-    const rawData: CellValue[][] = XLSX.utils.sheet_to_json(worksheet, {
-      header: 1,
-      defval: '',
-      blankrows: true,
-      raw: false,
-    }) as CellValue[][];
-
-    let data: CellValue[][];
-    const totalRows = rangeEndRow + 1;
-    const totalCols = rangeEndCol + 1;
-
-    if (rangeStartRow === 0 && rangeStartCol === 0) {
-      data = rawData;
-    } else {
-      data = [];
-      for (let r = 0; r < rangeStartRow; r++) {
-        data.push([]);
-      }
-      for (const row of rawData) {
-        if (rangeStartCol > 0) {
-          const paddedRow: CellValue[] = new Array(rangeStartCol).fill('');
-          paddedRow.push(...row);
-          data.push(paddedRow);
-        } else {
-          data.push(row);
-        }
-      }
-    }
-
-    const rows = Math.max(totalRows, data.length);
-    const cols = Math.max(
-      totalCols,
-      data.reduce((max, row) => Math.max(max, row.length), 0)
-    );
-
-    const merges = (worksheet['!merges'] || []).map((m: { s: { r: number; c: number }; e: { r: number; c: number } }) => ({
-      s: { r: m.s.r, c: m.s.c },
-      e: { r: m.e.r, c: m.e.c },
-    }));
-
-    const colWidths = buildColWidths(worksheet['!cols'] as ColInfo[] | undefined);
-
-    sheets[name] = { data, cols, rows, merges, colWidths };
+    // Only the range the sheet really uses is read, and a sheet over `limits`
+    // is marked tooLarge instead of parsed — see utils/sheetBounds.ts.
+    sheets[name] = worksheetToSheetData(worksheet, XLSX.utils, limits);
 
     const progress = 45 + ((i + 1) / totalSheets) * 45;
     setParseProgress(progress, `Parsed sheet "${name}"...`);
@@ -164,7 +137,7 @@ async function parseExcelBuffer(
 
   try {
     const { reconstructPivotTables } = await import('../utils/pivotReconstructor');
-    reconstructPivotTables(buffer, sheets, sheetNames);
+    reconstructPivotTables(buffer, sheets, sheetNames, limits);
   } catch (err) {
     console.warn('Pivot reconstruction skipped:', (err as Error).message);
   }
@@ -178,7 +151,7 @@ async function parseExcelBuffer(
   let chartOverlays: Record<string, import('../types').ChartOverlay[]> = {};
   try {
     const { extractChartOverlays } = await import('../utils/chartExtractor');
-    chartOverlays = extractChartOverlays(buffer, sheets, sheetNames);
+    chartOverlays = extractChartOverlays(buffer, sheets, sheetNames, limits.maxCells);
   } catch (err) {
     console.warn('Chart extraction skipped:', (err as Error).message);
   }
@@ -191,7 +164,7 @@ async function parseExcelBuffer(
     const { extractSheetStyles } = await import('../utils/styleExtractor');
     const sheetStyles = extractSheetStyles(buffer, sheetNames);
     for (const name of sheetNames) {
-      if (sheetStyles[name] && sheets[name]) {
+      if (sheetStyles[name] && sheets[name] && !sheets[name].tooLarge) {
         sheets[name].styles = sheetStyles[name];
       }
     }
@@ -221,6 +194,7 @@ async function parseExcelBuffer(
 async function parseCSVText(
   text: string,
   fileName: string,
+  limits: ResolvedSheetLimits,
   setParseProgress: SetProgressFn,
   setFileData: SetFileDataFn,
 ): Promise<void> {
@@ -230,31 +204,41 @@ async function parseCSVText(
   setParseProgress(20, 'Parsing rows...');
   await nextFrame();
 
-  const lines = text.split('\n');
-  const totalLines = lines.length;
+  const totalChars = text.length;
   const data: CellValue[][] = [];
+  const rows = data as string[][];
   let maxCols = 0;
+  // Rows up to and including the last one with content: trailing blank rows
+  // are dropped at the end, so they do not count against the limits.
+  let usedRows = 0;
+  let tooLarge = false;
 
   const CHUNK_SIZE = 5000;
+  let pos = 0;
 
-  for (let i = 0; i < totalLines; i += CHUNK_SIZE) {
-    const end = Math.min(i + CHUNK_SIZE, totalLines);
+  while (pos < totalChars) {
+    const first = rows.length;
+    pos = readCsvRows(text, pos, CHUNK_SIZE, rows);
 
-    for (let j = i; j < end; j++) {
-      const row = parseCSVLine(lines[j]);
+    for (let j = first; j < rows.length; j++) {
+      const row = rows[j];
       if (row.length > maxCols) maxCols = row.length;
-      data.push(row);
+      if (!isBlankCsvRow(row)) usedRows = j + 1;
     }
 
-    const progress = 20 + (end / totalLines) * 70;
-    setParseProgress(Math.min(progress, 92), `Parsed ${end.toLocaleString()} of ${totalLines.toLocaleString()} rows...`);
+    // Stop as soon as the sheet is over budget rather than reading on
+    if (exceedsSheetLimits(usedRows, maxCols, limits)) {
+      tooLarge = true;
+      break;
+    }
+
+    const progress = 20 + (pos / totalChars) * 70;
+    setParseProgress(Math.min(progress, 92), `Parsed ${rows.length.toLocaleString()} rows...`);
     await nextFrame();
   }
 
   // Remove trailing empty rows
-  while (data.length > 0 && (data[data.length - 1] as string[]).every((c) => c === '')) {
-    data.pop();
-  }
+  data.length = tooLarge ? 0 : usedRows;
 
   setParseProgress(95, 'Finalizing...');
   await nextFrame();
@@ -264,51 +248,16 @@ async function parseCSVText(
     fileName,
     sheetNames: [sheetName],
     sheets: {
-      [sheetName]: {
-        data,
-        cols: maxCols,
-        rows: data.length,
-        merges: [],
-        colWidths: [],
-      },
+      [sheetName]: tooLarge
+        ? { data: [], cols: 0, rows: 0, merges: [], colWidths: [], tooLarge: true }
+        : {
+            data,
+            cols: maxCols,
+            rows: data.length,
+            merges: [],
+            colWidths: [],
+          },
     },
     images: {},
   });
-}
-
-function parseCSVLine(line: string): string[] {
-  const result: string[] = [];
-  let current = '';
-  let inQuotes = false;
-
-  for (let i = 0; i < line.length; i++) {
-    const char = line[i];
-
-    if (inQuotes) {
-      if (char === '"') {
-        if (i + 1 < line.length && line[i + 1] === '"') {
-          current += '"';
-          i++;
-        } else {
-          inQuotes = false;
-        }
-      } else {
-        current += char;
-      }
-    } else {
-      if (char === '"') {
-        inQuotes = true;
-      } else if (char === ',') {
-        result.push(current.trim());
-        current = '';
-      } else if (char === '\r') {
-        // skip
-      } else {
-        current += char;
-      }
-    }
-  }
-
-  result.push(current.trim());
-  return result;
 }

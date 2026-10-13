@@ -6,6 +6,8 @@ export interface SourceLoaderState {
   fileName: string | null;
   isLoading: boolean;
   error: string | null;
+  /** The error behind `error`, for consumers that want the object itself. */
+  cause: Error | null;
 }
 
 /**
@@ -22,17 +24,18 @@ export function useSourceLoader(source: SheetViewerSource | undefined): SourceLo
     fileName: null,
     isLoading: false,
     error: null,
+    cause: null,
   });
 
   useEffect(() => {
     if (!source) {
-      setState({ buffer: null, fileName: null, isLoading: false, error: null });
+      setState({ buffer: null, fileName: null, isLoading: false, error: null, cause: null });
       return;
     }
 
     let cancelled = false;
 
-    setState({ buffer: null, fileName: null, isLoading: true, error: null });
+    setState({ buffer: null, fileName: null, isLoading: true, error: null, cause: null });
 
     async function load() {
       try {
@@ -62,11 +65,12 @@ export function useSourceLoader(source: SheetViewerSource | undefined): SourceLo
         }
 
         if (!cancelled) {
-          setState({ buffer, fileName, isLoading: false, error: null });
+          setState({ buffer, fileName, isLoading: false, error: null, cause: null });
         }
       } catch (err) {
         if (!cancelled) {
-          setState({ buffer: null, fileName: null, isLoading: false, error: (err as Error).message });
+          const cause = err instanceof Error ? err : new Error(String(err));
+          setState({ buffer: null, fileName: null, isLoading: false, error: cause.message, cause });
         }
       }
     }

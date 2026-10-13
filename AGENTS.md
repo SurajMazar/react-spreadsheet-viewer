@@ -44,7 +44,7 @@ Full TypeScript support is included — all props, handle types, and data types 
 | State | Zustand 5 (`zustand/vanilla` + `zustand/traditional`) | Instance-scoped stores; uses `use-sync-external-store` shim for React 17 compat |
 | Virtualization | @tanstack/react-virtual 3 | Two `useVirtualizer` instances (rows + columns) |
 | Excel Parsing | xlsx (SheetJS) 0.18 | Dynamic `import()` for code-splitting |
-| CSV Parsing | Custom parser | In `useFileParser.ts`, no external dep for CSV |
+| CSV Parsing | Custom RFC 4180 parser | `utils/csvParser.ts` (quote-aware, no trimming), no external dep for CSV |
 | Charts | Chart.js 4 + react-chartjs-2 5 | Statically imported; tree-shakeable; bar, line, pie, area |
 | ZIP/Decompression | fflate | For reading XLSX internal XML (charts, pivots) |
 | Styling | Plain CSS | All classes prefixed `sv-` or scoped under `.sheet-viewer` |
@@ -109,6 +109,9 @@ sheet-viewer/
 │   │   │   ├── zoom.ts              # Zoom clamping/stepping + pixel scaling
 │   │   │   ├── autoFit.ts           # Canvas-based column auto-fit measurement
 │   │   │   ├── columnWidths.ts      # Excel !cols → pixel widths
+│   │   │   ├── sheetBounds.ts       # Used-range clamping + parse limits (cell budget)
+│   │   │   ├── worksheetData.ts     # One SheetJS worksheet → SheetData (bounded)
+│   │   │   ├── csvParser.ts         # RFC 4180 CSV reader, resumable in chunks
 │   │   │   ├── clipboard.ts         # TSV + HTML copy/paste with style preservation
 │   │   │   ├── download.ts          # Export as XLSX or CSV
 │   │   │   ├── pivotReconstructor.ts # Reconstruct pivot tables from XLSX XML
@@ -182,7 +185,7 @@ Parsing runs on the **main thread** (not a Web Worker) using `async/await` with 
 
 1. Dynamically imports `xlsx` (code-split)
 2. Reads the workbook
-3. Processes each sheet (converts to `CellValue[][]`, handles offsets, merges, column widths)
+3. Processes each sheet (converts to `CellValue[][]`, handles offsets, merges, column widths) — reading only the range the sheet really uses and refusing sheets over `limits` (see §10, "Never trust the declared range")
 4. Reconstructs pivot tables from XLSX internal XML (`pivotReconstructor.ts`)
 5. Extracts embedded chart overlays from XLSX internal XML (`chartExtractor.ts`)
 6. Reports progress (0-100%) to the store at each step
@@ -434,6 +437,9 @@ Two consequences to keep in mind when touching the grid:
 ### Column Widths Need `cellStyles: true`
 SheetJS only parses `<cols>` into `worksheet['!cols']` when the workbook is read with `cellStyles: true`. Without that flag it is `undefined` and every author-set column width is silently dropped. `src/lib/utils/columnWidths.ts` converts the resulting entries (`wpx` → `wch` → raw `width`) to pixels. Columns the author never sized are left as **holes** in `colWidths`, so they fall back to the viewer's 100px default rather than Excel's narrower 64px one.
 
+### Never Trust the Declared Range
+A sheet's `!ref` is the file's own `<dimension ref>`, and `sheet_to_json` with `defval` + `blankrows` materialises every cell of it — a 1 KB file declaring `A1:XFD1048576` used to allocate ~17 billion cells and kill the tab. `utils/sheetBounds.ts` instead scans the cell keys the worksheet object holds (bounded by the file's real content), keeps the declared start, shrinks the end to the last real row/col (a merge anchored on a real cell counts to its far corner) and never grows past the declared end. `worksheetData.ts` passes that range to `sheet_to_json` via its `range` option (the worksheet is not mutated), clips `!merges` to it, and holds rows/cols/cells and the total merged area (the grid expands every merged cell into `mergeMap`) to `limits`. Over budget → `SheetData.tooLarge`, rendered by `SheetTooLarge` in place of `VirtualGrid`. Anything else that walks a file-supplied range needs the same treatment: chart series references share one cell budget (`chartExtractor.ts`), pivot fills are skipped when their location would land outside the limits, and CSV is held to `rows × widest row`.
+
 ### XLSX Internal XML Access
 For features that SheetJS doesn't expose (pivot tables, embedded charts), the raw `.xlsx` ZIP is decompressed with `fflate` and the internal XML files are parsed manually:
 - `pivotReconstructor.ts` reads `xl/pivotTables/*.xml` and `xl/pivotCache/*.xml`
@@ -558,6 +564,10 @@ npm publish --otp=<code>    # Requires 2FA OTP from authenticator app
 | `src/lib/utils/autoFit.ts` | ~180 | Canvas text measurement + per-column auto-fit width |
 | `src/lib/utils/keyboard.ts` | ~60 | Normalizes `keyboardInteractions` into one flat set of group flags |
 | `src/lib/utils/columnWidths.ts` | ~100 | SheetJS `!cols` → pixel widths (wpx/wch/width, clamped) |
+| `src/lib/utils/sheetBounds.ts` | ~220 | Used range from real cell keys, merge clipping, parse limits (`DEFAULT_SHEET_LIMITS`) |
+| `src/lib/utils/worksheetData.ts` | ~100 | One worksheet → `SheetData`, bounded or marked `tooLarge` |
+| `src/lib/utils/csvParser.ts` | ~110 | RFC 4180 CSV reader (quoted newlines/commas, `""`, CRLF/LF/CR), resumable |
+| `src/lib/components/SheetTooLarge.tsx` | ~20 | "This sheet is too large to preview" in place of the grid |
 | `src/lib/utils/clipboard.ts` | ~147 | TSV copy/paste utilities for Excel-compatible clipboard |
 | `src/lib/utils/download.ts` | ~60 | XLSX/CSV export |
 | `src/lib/utils/pivotReconstructor.ts` | ~438 | Pivot table reconstruction |
