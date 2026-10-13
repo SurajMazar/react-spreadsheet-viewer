@@ -37,6 +37,12 @@ export interface SheetData {
   conditionalFormats?: ConditionalFormatRule[];
   /** Sparse map of data validation rules keyed by "row,col" */
   validations?: Record<string, ValidationRule>;
+  /**
+   * Set when the sheet's used range is over the viewer's `limits`. The sheet
+   * was not parsed — `data` is empty and `rows`/`cols` are 0 — and the grid
+   * shows a "too large to preview" message in its place.
+   */
+  tooLarge?: boolean;
 }
 
 /** Style information for a single cell */
@@ -365,6 +371,31 @@ export interface SheetViewerKeyboardConfig {
   search?: boolean;
 }
 
+/**
+ * Caps on how much of a sheet the viewer will parse.
+ *
+ * The parser reads only the range a sheet really uses — its declared range
+ * shrunk to the last row and column holding a cell — and then holds that range
+ * to these limits. A sheet over any of them is not parsed: the grid shows "This
+ * sheet is too large to preview" for it, and the workbook's other sheets load
+ * as usual. Read when a file is parsed; changing them does not re-parse the
+ * current file.
+ */
+export interface SheetViewerLimits {
+  /** Most rows a sheet may span (last used row + 1). Default: 1,048,576 (Excel's maximum) */
+  maxRows?: number;
+  /** Most columns a sheet may span (last used column + 1). Default: 16,384 (Excel's maximum) */
+  maxCols?: number;
+  /**
+   * Most cells the parser will build for one sheet: used rows × columns up to
+   * the last used one. Also caps the sheet's total merged area. Default: 2,000,000
+   */
+  maxCells?: number;
+}
+
+/** Receives the error when the source fails to load or the file fails to parse. */
+export type SheetViewerErrorHandler = (error: Error) => void;
+
 /** Props for the SheetViewer component */
 export interface SheetViewerProps {
   /** URL, File, ArrayBuffer, or TypedArray to load */
@@ -496,6 +527,18 @@ export interface SheetViewerProps {
    * `navigation`.
    */
   keyboardInteractions?: boolean | SheetViewerKeyboardConfig;
+  /**
+   * Parse limits per sheet — see {@link SheetViewerLimits}. Any limit left out
+   * keeps its default; a sheet over them shows "This sheet is too large to
+   * preview" instead of hanging the page.
+   */
+  limits?: SheetViewerLimits;
+  /**
+   * Called when the source fails to load (fetch or read error) or the file
+   * fails to parse. The built-in error message is still shown; this is for
+   * logging or reacting in the host app.
+   */
+  onError?: SheetViewerErrorHandler;
   /** Container height (CSS value or number of pixels) */
   height?: number | string;
   /** Container width (CSS value or number of pixels) */

@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, waitFor, screen, act } from '@testing-library/react';
+import { render, waitFor, screen, act, fireEvent } from '@testing-library/react';
 import React, { createRef } from 'react';
+import * as XLSX from 'xlsx';
+import { unzipSync, zipSync, strFromU8, strToU8 } from 'fflate';
 import { SheetViewer } from '../index';
 import type { SheetViewerHandle, CellRange, SheetViewerLoadingState } from '../types';
 
@@ -1661,4 +1663,177 @@ describe('SheetViewer — header scroll sync', () => {
 
     expect(colHeaderTransform()).toBe('translate3d(-275px, 0, 0)');
   });
+});
+
+// =============================================
+// Parse limits — sheets over budget are refused, not parsed
+// =============================================
+
+/**
+ * An .xlsx whose sheets are written normally, then have their declared
+ * `<dimension>` rewritten — the 1 KB file that claims A1:XFD1048576.
+ */
+function workbookBuffer(
+  sheets: Record<string, unknown[][]>,
+  dimensions: Record<number, string> = {},
+): ArrayBuffer {
+  const wb = XLSX.utils.book_new();
+  for (const [name, rows] of Object.entries(sheets)) {
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), name);
+  }
+  const zip = unzipSync(new Uint8Array(XLSX.write(wb, { type: 'array', bookType: 'xlsx' }) as ArrayBuffer));
+  for (const [index, ref] of Object.entries(dimensions)) {
+    const path = `xl/worksheets/sheet${index}.xml`;
+    const xml = strFromU8(zip[path]).replace(/<dimension ref="[^"]*"\/>/, `<dimension ref="${ref}"/>`);
+    zip[path] = new Uint8Array(strToU8(xml));
+  }
+  const out = zipSync(zip);
+  const buffer = new ArrayBuffer(out.byteLength);
+  new Uint8Array(buffer).set(out);
+  return buffer;
+}
+
+const TOO_LARGE = 'This sheet is too large to preview.';
+
+describe('SheetViewer — parse limits', () => {
+  it('clamps a sheet that declares the whole grid but holds one cell', async () => {
+    const ref = createRef<SheetViewerHandle>();
+    const source = workbookBuffer({ Big: [['only']] }, { 1: 'A1:XFD1048576' });
+
+    render(<SheetViewer ref={ref} source={source} height={600} width={800} />);
+    await multiSheetHelper(ref);
+
+    const data = ref.current!.getSheetData('Big')!;
+    expect(data.rows).toBe(1);
+    expect(data.cols).toBe(1);
+    expect(data.data).toEqual([['only']]);
+    expect(data.tooLarge).toBeUndefined();
+    expect(screen.queryByText(TOO_LARGE)).toBeNull();
+  }, 15000);
+
+  it('shows the message for a sheet over the limits and keeps the other sheets usable', async () => {
+    const ref = createRef<SheetViewerHandle>();
+    const source = workbookBuffer({ Huge: [[1, 2, 3], [4, 5, 6]], Ok: [['a', 'b']] });
+
+    render(
+      <SheetViewer ref={ref} source={source} limits={{ maxCells: 4 }} height={600} width={800} />
+    );
+    await multiSheetHelper(ref);
+
+    expect(ref.current!.getSheetData('Huge')).toMatchObject({ tooLarge: true, rows: 0, cols: 0, data: [] });
+    expect(ref.current!.getSheetData('Ok')!.data).toEqual([['a', 'b']]);
+
+    expect(screen.getByText(TOO_LARGE)).toBeTruthy();
+    expect(document.querySelector('.sv-sheet-too-large')).not.toBeNull();
+    expect(document.querySelector('.sv-grid-container')).toBeNull();
+
+    // Switch to the sheet that fits
+    fireEvent.click(screen.getByText('Ok'));
+    await waitFor(() => { expect(screen.queryByText(TOO_LARGE)).toBeNull(); });
+    expect(document.querySelector('.sv-grid-container')).not.toBeNull();
+
+    // And back
+    fireEvent.click(screen.getByText('Huge'));
+    await waitFor(() => { expect(screen.getByText(TOO_LARGE)).toBeTruthy(); });
+  }, 15000);
+
+  it('shows only the message, with no download hint, even when downloadable', async () => {
+    const ref = createRef<SheetViewerHandle>();
+    const source = workbookBuffer({ S: [[1, 2], [3, 4]] });
+
+    render(
+      <SheetViewer ref={ref} source={source} downloadable limits={{ maxRows: 1 }} height={600} width={800} />
+    );
+    await multiSheetHelper(ref);
+
+    const message = document.querySelector('.sv-sheet-too-large')!;
+    expect(message.textContent).toBe(TOO_LARGE);
+  }, 15000);
+
+  it('leaves sheets within custom limits alone', async () => {
+    const ref = createRef<SheetViewerHandle>();
+    const source = workbookBuffer({ S: [[1, 2], [3, 4]] });
+
+    render(
+      <SheetViewer ref={ref} source={source} limits={{ maxRows: 2, maxCols: 2, maxCells: 4 }} height={600} width={800} />
+    );
+    await multiSheetHelper(ref);
+
+    expect(ref.current!.getSheetData('S')!.tooLarge).toBeUndefined();
+    expect(screen.queryByText(TOO_LARGE)).toBeNull();
+  }, 15000);
+
+  it('applies the same limits to CSV', async () => {
+    const ref = createRef<SheetViewerHandle>();
+    const file = createCsvFile('a,b,c\n1,2,3\n4,5,6\n');
+
+    render(<SheetViewer ref={ref} source={file} limits={{ maxCells: 8 }} height={600} width={800} />);
+    await multiSheetHelper(ref);
+
+    expect(ref.current!.getSheetData()).toMatchObject({ tooLarge: true, data: [] });
+    expect(screen.getByText(TOO_LARGE)).toBeTruthy();
+  }, 15000);
+});
+
+// =============================================
+// CSV parsing — RFC 4180 through the component
+// =============================================
+describe('SheetViewer — CSV parsing', () => {
+  it('keeps quoted newlines, commas and spaces in their cells', async () => {
+    const ref = createRef<SheetViewerHandle>();
+    const file = createCsvFile('id,note\r\n1,"line one\nline two"\r\n2," a, b "\r\n3,  padded  \r\n');
+
+    render(<SheetViewer ref={ref} source={file} height={600} width={800} />);
+    await multiSheetHelper(ref);
+
+    const data = ref.current!.getSheetData()!;
+    expect(data.data).toEqual([
+      ['id', 'note'],
+      ['1', 'line one\nline two'],
+      ['2', ' a, b '],
+      ['3', '  padded  '],
+    ]);
+    expect(data.rows).toBe(4);
+    expect(data.cols).toBe(2);
+  }, 15000);
+});
+
+// =============================================
+// onError
+// =============================================
+describe('SheetViewer — onError', () => {
+  it('is called for a corrupt file, and the built-in error UI still shows', async () => {
+    const onError = vi.fn();
+    // A zip signature followed by garbage
+    const corrupt = new ArrayBuffer(16);
+    new Uint8Array(corrupt).set([0x50, 0x4b, 0x03, 0x04, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    render(<SheetViewer source={corrupt} onError={onError} height={600} width={800} />);
+
+    await waitFor(() => { expect(onError).toHaveBeenCalledTimes(1); }, { timeout: 10000 });
+    expect(onError.mock.calls[0][0]).toBeInstanceOf(Error);
+    await waitFor(() => { expect(document.querySelector('.sv-error-overlay')).not.toBeNull(); });
+    errorSpy.mockRestore();
+  }, 15000);
+
+  it('is called when the source fails to load', async () => {
+    const onError = vi.fn();
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(null, { status: 404, statusText: 'Not Found' })));
+
+    render(<SheetViewer source="https://example.test/missing.xlsx" onError={onError} height={600} width={800} />);
+
+    await waitFor(() => { expect(onError).toHaveBeenCalledTimes(1); }, { timeout: 10000 });
+    expect((onError.mock.calls[0][0] as Error).message).toContain('404');
+  }, 15000);
+
+  it('is not called for a file that loads', async () => {
+    const ref = createRef<SheetViewerHandle>();
+    const onError = vi.fn();
+
+    render(<SheetViewer ref={ref} source={createCsvFile(sampleCsv)} onError={onError} height={600} width={800} />);
+    await multiSheetHelper(ref);
+
+    expect(onError).not.toHaveBeenCalled();
+  }, 15000);
 });

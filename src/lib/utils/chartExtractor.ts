@@ -7,11 +7,22 @@
  */
 import { unzipSync, strFromU8 } from 'fflate';
 import type { SheetData, ChartOverlay, ChartType, ChartSeries, CellValue } from '../types';
+import { DEFAULT_SHEET_LIMITS } from './sheetBounds';
 
 // EMU to pixel conversion (96 DPI)
 const EMU_PER_PX = 9525;
 
 type ZipEntries = Record<string, Uint8Array>;
+
+/**
+ * Cells chart references may still read, shared by every chart in the
+ * workbook. Series ranges come from the file, so without it one chart pointing
+ * at A1:XFD1048576 — or thousands of series over large ranges — would build
+ * billions of values.
+ */
+interface CellBudget {
+  remaining: number;
+}
 
 interface DrawingAnchor {
   col: number;
@@ -25,13 +36,18 @@ interface DrawingAnchor {
 
 /**
  * Extract all embedded chart overlays for every sheet.
+ *
+ * `maxCells` caps the cells all chart references together may read; see
+ * `resolveReference`.
  */
 export function extractChartOverlays(
   buffer: ArrayBuffer,
   sheets: Record<string, SheetData>,
   sheetNames: string[],
+  maxCells: number = DEFAULT_SHEET_LIMITS.maxCells,
 ): Record<string, ChartOverlay[]> {
   const overlays: Record<string, ChartOverlay[]> = {};
+  const budget: CellBudget = { remaining: maxCells };
 
   try {
     const uint8 = new Uint8Array(buffer);
@@ -89,7 +105,7 @@ export function extractChartOverlays(
         const chartXml = readZip(zip, chartPath);
         if (!chartXml) continue;
 
-        const chartDef = parseChartXml(chartXml, sheets, sheetName);
+        const chartDef = parseChartXml(chartXml, sheets, sheetName, budget);
         if (!chartDef) continue;
 
         chartOverlaysList.push({
@@ -205,6 +221,7 @@ function parseChartXml(
   xml: string,
   sheets: Record<string, SheetData>,
   currentSheet: string,
+  budget: CellBudget,
 ): { chartType: ChartType; title: string; series: ChartSeries[] } | null {
   let chartType: ChartType = 'bar';
   if (xml.includes('<c:lineChart>')) chartType = 'line';
@@ -213,7 +230,7 @@ function parseChartXml(
   else if (xml.includes('<c:scatterChart>')) chartType = 'scatter';
 
   const title = extractChartTitle(xml) || '';
-  const series = extractSeries(xml, sheets, currentSheet);
+  const series = extractSeries(xml, sheets, currentSheet, budget);
 
   if (series.length === 0) return null;
 
@@ -231,6 +248,7 @@ function extractSeries(
   xml: string,
   sheets: Record<string, SheetData>,
   currentSheet: string,
+  budget: CellBudget,
 ): ChartSeries[] {
   const series: ChartSeries[] = [];
   const serRe = /<c:ser>([\s\S]*?)<\/c:ser>/g;
@@ -246,10 +264,10 @@ function extractSeries(
     const valRef = extractCellRef(block, /<c:val>[\s\S]*?<c:f>([^<]*)<\/c:f>/);
 
     const categories = catRef
-      ? resolveReference(catRef, sheets, currentSheet)
+      ? resolveReference(catRef, sheets, currentSheet, budget)
       : [];
     const values = valRef
-      ? resolveReference(valRef, sheets, currentSheet).map((v) => parseFloat(String(v)) || 0)
+      ? resolveReference(valRef, sheets, currentSheet, budget).map((v) => parseFloat(String(v)) || 0)
       : [];
 
     if (values.length > 0) {
@@ -272,6 +290,7 @@ function resolveReference(
   ref: string,
   sheets: Record<string, SheetData>,
   currentSheet: string,
+  budget: CellBudget,
 ): (string | number)[] {
   let sheetName = currentSheet;
   let rangeStr = ref;
@@ -293,16 +312,34 @@ function resolveReference(
 
   if (!start || !end) return [];
 
+  // A range bigger than what is left of the budget is read no further than
+  // the sheet's parsed extent (past it every value is blank anyway); if even
+  // that does not fit, the reference resolves to nothing.
+  let endRow = end.row;
+  let endCol = end.col;
+  let cells = rectCells(start.row, start.col, endRow, endCol);
+  if (cells > budget.remaining) {
+    endRow = Math.min(endRow, sheet.rows - 1);
+    endCol = Math.min(endCol, sheet.cols - 1);
+    cells = rectCells(start.row, start.col, endRow, endCol);
+    if (cells > budget.remaining) return [];
+  }
+  budget.remaining -= cells;
+
   const values: (string | number)[] = [];
 
-  for (let r = start.row; r <= end.row; r++) {
-    for (let c = start.col; c <= end.col; c++) {
+  for (let r = start.row; r <= endRow; r++) {
+    for (let c = start.col; c <= endCol; c++) {
       const val = sheet.data[r]?.[c];
       values.push(val == null ? '' : val as string | number);
     }
   }
 
   return values;
+}
+
+function rectCells(startRow: number, startCol: number, endRow: number, endCol: number): number {
+  return Math.max(0, endRow - startRow + 1) * Math.max(0, endCol - startCol + 1);
 }
 
 function parseCellAddr(addr: string): { row: number; col: number } | null {

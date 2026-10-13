@@ -14,6 +14,7 @@ import SheetTabs from './components/SheetTabs';
 import StatusBar from './components/StatusBar';
 import ChartPanel from './components/ChartPanel';
 import SearchBar from './components/SearchBar';
+import SheetTooLarge from './components/SheetTooLarge';
 import type { SheetViewerProps, SheetViewerHandle, SheetViewerMode, SheetViewerLoadingState, CellValue, CellComment, ParsedGridLineConfig } from './types';
 import './styles/sheet-viewer.css';
 
@@ -77,14 +78,28 @@ function SheetViewerInner({
   searchable = true,
   tabNavigation = true,
   keyboardInteractions = true,
+  limits,
+  onError,
   height = '100%',
   width = '100%',
   className = '',
   forwardedRef,
 }: SheetViewerInnerProps) {
   const storeApi = useViewerStoreApi();
-  const { buffer, fileName, isLoading: sourceLoading, error: sourceError } = useSourceLoader(source);
-  const { parseBuffer } = useFileParser();
+  const { buffer, fileName, isLoading: sourceLoading, error: sourceError, cause: sourceCause } = useSourceLoader(source);
+
+  // Latest onError, so an inline callback neither re-runs the effect below nor
+  // changes parseBuffer's identity (which would re-parse the file).
+  const onErrorRef = useReactRef(onError);
+  onErrorRef.current = onError;
+  const reportError = useCallback((error: Error) => onErrorRef.current?.(error), []);
+
+  const { parseBuffer } = useFileParser({ limits, onError: reportError });
+
+  // Source failures (fetch/read) — parse failures are reported by the parser
+  useEffect(() => {
+    if (sourceCause) reportError(sourceCause);
+  }, [sourceCause, reportError]);
 
   const storeFileName = useViewerStore((s) => s.fileName);
   const isParsing = useViewerStore((s) => s.isParsing);
@@ -530,17 +545,21 @@ function SheetViewerInner({
           />
           <div className="sv-main-content">
             <div className="sv-grid-wrapper">
-              <VirtualGrid
-                highlightable={highlightable}
-                highlightColor={highlightColor}
-                highlightBorderColor={highlightBorderColor}
-                highlightAreaRef={highlightAreaRef}
-                highlightAreaProps={highlightAreaProps}
-                gridApiRef={gridApiRef}
-                parsedGridLines={parsedGridLines.length > 0 ? parsedGridLines : undefined}
-                tabNavigation={tabNavigation}
-                keyboard={keyboard}
-              />
+              {sheetData?.tooLarge ? (
+                <SheetTooLarge />
+              ) : (
+                <VirtualGrid
+                  highlightable={highlightable}
+                  highlightColor={highlightColor}
+                  highlightBorderColor={highlightBorderColor}
+                  highlightAreaRef={highlightAreaRef}
+                  highlightAreaProps={highlightAreaProps}
+                  gridApiRef={gridApiRef}
+                  parsedGridLines={parsedGridLines.length > 0 ? parsedGridLines : undefined}
+                  tabNavigation={tabNavigation}
+                  keyboard={keyboard}
+                />
+              )}
               {searchable && <SearchBar shortcutsEnabled={keyboard.search} />}
             </div>
             {chartable && <ChartPanel />}

@@ -7,6 +7,7 @@
  */
 import { unzipSync, strFromU8 } from 'fflate';
 import type { SheetData, CellValue } from '../types';
+import { DEFAULT_SHEET_LIMITS, type ResolvedSheetLimits } from './sheetBounds';
 
 // ============================================================
 // Internal interfaces
@@ -53,11 +54,16 @@ type ZipEntries = Record<string, Uint8Array>;
 
 /**
  * Reconstruct pivot tables for sheets that are empty/near-empty.
+ *
+ * Sheets the parser refused as too large are left alone, and a pivot whose
+ * output would land outside `limits` is skipped — its location comes from the
+ * file, so it is not trusted to be anywhere near the data.
  */
 export function reconstructPivotTables(
   buffer: ArrayBuffer,
   sheets: Record<string, SheetData>,
   sheetNames: string[],
+  limits: ResolvedSheetLimits = DEFAULT_SHEET_LIMITS,
 ): Record<string, SheetData> {
   try {
     const uint8 = new Uint8Array(buffer);
@@ -74,7 +80,7 @@ export function reconstructPivotTables(
 
     for (const sheetName of sheetNames) {
       const sheetData = sheets[sheetName];
-      if (!sheetData) continue;
+      if (!sheetData || sheetData.tooLarge) continue;
 
       const nonEmptyRows = countNonEmptyRows(sheetData.data);
       if (nonEmptyRows > 5) continue;
@@ -117,7 +123,7 @@ export function reconstructPivotTables(
 
         const pivotResult = computePivot(sourceSheet.data, cacheDef, pivotDef);
 
-        if (pivotResult && pivotResult.length > 0) {
+        if (pivotResult && pivotResult.length > 0 && pivotFits(pivotDef.location, pivotResult, limits)) {
           fillPivotData(sheetData, pivotDef.location, pivotResult);
         }
       }
@@ -394,6 +400,30 @@ function formatPivotValue(val: string): string {
 // ============================================================
 // Fill pivot data into sheet
 // ============================================================
+
+/**
+ * Whether filling `pivotResult` at `location` stays within `limits`. Filling
+ * pads every row out to the pivot's start column and adds an empty row for
+ * every row above it, so both count.
+ */
+function pivotFits(
+  location: PivotLocation,
+  pivotResult: CellValue[][],
+  limits: ResolvedSheetLimits,
+): boolean {
+  const { startRow, startCol } = location;
+  if (!Number.isInteger(startRow) || !Number.isInteger(startCol) || startRow < 0 || startCol < 0) {
+    return false;
+  }
+  const width = pivotResult.reduce((max, row) => Math.max(max, row.length), 0);
+  const neededRows = startRow + pivotResult.length;
+  const neededCols = startCol + width;
+  return (
+    neededRows <= limits.maxRows &&
+    neededCols <= limits.maxCols &&
+    pivotResult.length * neededCols <= limits.maxCells
+  );
+}
 
 function fillPivotData(
   sheetData: SheetData,

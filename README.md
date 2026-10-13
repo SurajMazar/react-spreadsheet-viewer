@@ -149,6 +149,8 @@ The `source` prop accepts multiple formats:
 | `searchable` | `boolean` | `true` | Enable Ctrl+F search |
 | `tabNavigation` | `boolean` | `true` | Enable Tab / Shift+Tab to move between cells |
 | `keyboardInteractions` | `boolean \| SheetViewerKeyboardConfig` | `true` | Turn the viewer's keyboard shortcuts and grid navigation off, all at once or by group. See [Keyboard interactions](#keyboard-interactions) |
+| `limits` | `SheetViewerLimits` | `{ maxRows: 1048576, maxCols: 16384, maxCells: 2000000 }` | Per-sheet parse limits. A sheet over them shows "This sheet is too large to preview" instead of being parsed; other sheets load normally. See [Large and malformed files](#large-and-malformed-files) |
+| `onError` | `(error: Error) => void` | — | Called when the source fails to load or the file fails to parse. The built-in error message still shows |
 | `height` | `number \| string` | `'100%'` | Container height (px or CSS value) |
 | `width` | `number \| string` | `'100%'` | Container width (px or CSS value) |
 | `className` | `string` | `''` | Additional CSS class on the root element |
@@ -776,6 +778,30 @@ Every callback receives a snapshot of the viewer:
 
 ---
 
+## Large and malformed files
+
+A sheet's declared range comes from the file itself (the `<dimension>` of an `.xlsx`), so a tiny file can claim the whole `A1:XFD1048576` grid. The viewer never trusts it: it reads only the range the sheet really uses — the declared start, up to the last row and column that hold a cell — and merges are clipped to that range. Trailing empty rows and columns inside an over-declared range are therefore not rendered.
+
+The used range is then held to `limits`. A sheet over any limit is not parsed: its `SheetData` comes back with `tooLarge: true`, no data and 0 rows/cols, and the grid area shows **"This sheet is too large to preview."** The sheet tabs keep working, so the workbook's other sheets are still viewable. CSV files are held to the same limits (rows × widest row).
+
+```tsx
+<SheetViewer
+  source={file}
+  limits={{ maxCells: 500_000 }} // the others keep their defaults
+  onError={(err) => reportToSentry(err)}
+/>
+```
+
+| Field | Default | Description |
+|---|---|---|
+| `maxRows` | `1048576` | Most rows a sheet may span (last used row + 1) — Excel's maximum |
+| `maxCols` | `16384` | Most columns a sheet may span (last used column + 1) — Excel's maximum |
+| `maxCells` | `2000000` | Most cells parsed for one sheet (used rows × columns up to the last used one); also caps a sheet's total merged area |
+
+Limits are read when a file is parsed; changing them does not re-parse the current file. `DEFAULT_SHEET_LIMITS` is exported.
+
+---
+
 ## Custom loading UI
 
 `renderLoading` replaces the built-in card shown while the file is fetched and parsed. Your node renders inside the viewer's own full-bleed overlay, so you only describe the content — positioning and stacking are handled.
@@ -871,6 +897,8 @@ import type {
   SheetViewerProps,
   SheetViewerHandle,
   SheetViewerKeyboardConfig,
+  SheetViewerLimits,
+  SheetViewerErrorHandler,
   SheetViewerSource,
   SheetViewerMode,
   SheetViewerTheme,
