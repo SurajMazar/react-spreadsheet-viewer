@@ -35,6 +35,10 @@ export default defineConfig(({ mode }) => {
             },
           },
           cssFileName: 'sheet-viewer',
+          // public/ holds the demo app's assets. Copying it into dist/ would
+          // publish whatever is in there with the library (it shipped 2.3.6
+          // with 165 MB of local benchmark workbooks).
+          copyPublicDir: false,
         }
       : {
           rollupOptions: {
