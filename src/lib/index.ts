@@ -10,7 +10,7 @@ export {
   AUTO_FIT_MIN_WIDTH,
   AUTO_FIT_MAX_WIDTH,
 } from './utils/autoFit';
-export { DEFAULT_SHEET_LIMITS } from './utils/sheetBounds';
+export { DEFAULT_SHEET_LIMITS, FILE_TOO_LARGE_MESSAGE, FileTooLargeError } from './utils/sheetBounds';
 export type {
   SheetViewerTool,
   SheetViewerToolDefinition,

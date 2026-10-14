@@ -16,7 +16,7 @@ Operational guide for AI agents working in this repo. **[AGENTS.md](AGENTS.md) i
 pnpm install
 pnpm dev            # demo app (vite)
 pnpm typecheck      # tsc --noEmit — must be 0 errors
-pnpm test           # vitest run — ~684 tests across 24 files
+pnpm test           # vitest run — ~692 tests across 24 files
 pnpm lint           # eslint .
 pnpm build:lib      # build the publishable library → dist/
 pnpm storybook      # component stories at :6006

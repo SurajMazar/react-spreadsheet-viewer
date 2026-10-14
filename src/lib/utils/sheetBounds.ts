@@ -38,12 +38,30 @@ export type ResolvedSheetLimits = Required<SheetViewerLimits>;
  *
  * Rows and columns default to Excel's own maxima, so they never bite on a
  * well-formed file; the cell budget is what stops an over-declared range.
+ *
+ * The cell budget and file size come from measurement (Chrome, Apple silicon,
+ * 20-column sheets): 2M cells parsed in ~13 s / ~720 MB of heap, 4M cells in
+ * ~26 s / ~1.6 GB, without the tab crashing. SheetJS parses the whole workbook
+ * before any per-sheet limit can be applied, so `maxBytes` is what bounds that
+ * cost; 50 MB admits the 4M-cell test file (42 MB).
  */
 export const DEFAULT_SHEET_LIMITS: Readonly<ResolvedSheetLimits> = Object.freeze({
   maxRows: 1_048_576,
   maxCols: 16_384,
-  maxCells: 2_000_000,
+  maxCells: 4_000_000,
+  maxBytes: 50 * 1024 * 1024,
 });
+
+/** Shown, and passed to `onError`, when a file is over `maxBytes`. */
+export const FILE_TOO_LARGE_MESSAGE = 'This file is too large to preview.';
+
+/** A file over the `maxBytes` limit. Refused before it is parsed. */
+export class FileTooLargeError extends Error {
+  constructor(message: string = FILE_TOO_LARGE_MESSAGE) {
+    super(message);
+    this.name = 'FileTooLargeError';
+  }
+}
 
 /**
  * Fill in any limit the consumer left out, or gave as something that is not a
@@ -59,6 +77,7 @@ export function resolveSheetLimits(
     maxRows: pick(limits?.maxRows, DEFAULT_SHEET_LIMITS.maxRows),
     maxCols: pick(limits?.maxCols, DEFAULT_SHEET_LIMITS.maxCols),
     maxCells: pick(limits?.maxCells, DEFAULT_SHEET_LIMITS.maxCells),
+    maxBytes: pick(limits?.maxBytes, DEFAULT_SHEET_LIMITS.maxBytes),
   };
 }
 
