@@ -433,6 +433,9 @@ function extractCellStylesFromSheet(
 export function extractSheetStyles(
   buffer: ArrayBuffer,
   sheetNames: string[],
+  /** Sheets to skip (e.g. refused as too large). All of `sheetNames` is still
+   *  needed to map names to sheet files, which can go by position. */
+  skip: (name: string) => boolean = () => false,
 ): Record<string, Record<string, CellStyle>> {
   const result: Record<string, Record<string, CellStyle>> = {};
 
@@ -452,6 +455,7 @@ export function extractSheetStyles(
 
     // 4. Extract per-sheet
     for (const name of sheetNames) {
+      if (skip(name)) continue;
       const filePath = sheetFileMap[name];
       if (!filePath) continue;
 

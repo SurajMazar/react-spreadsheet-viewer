@@ -22,8 +22,13 @@ function sheetWith(ref: string, ...addresses: string[]): Record<string, unknown>
 }
 
 describe('resolveSheetLimits', () => {
-  it('defaults to Excel maxima for rows/cols and 2M cells', () => {
-    expect(DEFAULT_SHEET_LIMITS).toEqual({ maxRows: 1_048_576, maxCols: 16_384, maxCells: 2_000_000 });
+  it('defaults to Excel maxima for rows/cols, 4M cells and 50 MB', () => {
+    expect(DEFAULT_SHEET_LIMITS).toEqual({
+      maxRows: 1_048_576,
+      maxCols: 16_384,
+      maxCells: 4_000_000,
+      maxBytes: 50 * 1024 * 1024,
+    });
     expect(resolveSheetLimits()).toEqual(DEFAULT_SHEET_LIMITS);
     expect(resolveSheetLimits(null)).toEqual(DEFAULT_SHEET_LIMITS);
   });
@@ -35,6 +40,12 @@ describe('resolveSheetLimits', () => {
   it('falls back to the default for unusable values and accepts Infinity', () => {
     expect(resolveSheetLimits({ maxRows: 0, maxCols: -5, maxCells: Number.NaN })).toEqual(DEFAULT_SHEET_LIMITS);
     expect(resolveSheetLimits({ maxCells: Infinity }).maxCells).toBe(Infinity);
+  });
+
+  it('resolves maxBytes like the other limits', () => {
+    expect(resolveSheetLimits({ maxBytes: 1024 }).maxBytes).toBe(1024);
+    expect(resolveSheetLimits({ maxBytes: 0 }).maxBytes).toBe(DEFAULT_SHEET_LIMITS.maxBytes);
+    expect(resolveSheetLimits({ maxBytes: Infinity }).maxBytes).toBe(Infinity);
   });
 });
 
@@ -126,7 +137,7 @@ describe('rangeCellCount / exceedsSheetLimits', () => {
   });
 
   it('flags rows, cols and cells over the limits, inclusive at the limit', () => {
-    const limits = { maxRows: 10, maxCols: 5, maxCells: 20 };
+    const limits = { maxRows: 10, maxCols: 5, maxCells: 20, maxBytes: Infinity };
     expect(exceedsSheetLimits(10, 2, limits)).toBe(false);
     expect(exceedsSheetLimits(11, 1, limits)).toBe(true);
     expect(exceedsSheetLimits(1, 5, limits)).toBe(false);
@@ -172,10 +183,10 @@ describe('planSheetBounds', () => {
   });
 
   it('refuses overlapping merges whose total area is over budget', () => {
-    // 100x100 range = 10,000 cells, fine on its own; 300 copies of a
-    // merge covering all of it is 3,000,000 merged cells.
+    // 100x100 range = 10,000 cells, fine on its own; 500 copies of a
+    // merge covering all of it is 5,000,000 merged cells (budget: 4,000,000).
     const ws = sheetWith('A1:CV100', 'A1', 'CV100');
-    const merges = Array.from({ length: 300 }, () => range('A1:CV100'));
+    const merges = Array.from({ length: 500 }, () => range('A1:CV100'));
     expect(plan(ws, merges)).toMatchObject({ kind: 'tooLarge', reason: 'merges' });
   });
 

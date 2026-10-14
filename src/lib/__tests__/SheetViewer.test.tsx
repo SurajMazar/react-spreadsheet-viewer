@@ -3,7 +3,7 @@ import { render, waitFor, screen, act, fireEvent } from '@testing-library/react'
 import React, { createRef } from 'react';
 import * as XLSX from 'xlsx';
 import { unzipSync, zipSync, strFromU8, strToU8 } from 'fflate';
-import { SheetViewer } from '../index';
+import { SheetViewer, FileTooLargeError, FILE_TOO_LARGE_MESSAGE } from '../index';
 import type { SheetViewerHandle, CellRange, SheetViewerLoadingState } from '../types';
 
 // Mock requestAnimationFrame to resolve immediately in jsdom
@@ -1825,6 +1825,19 @@ describe('SheetViewer — onError', () => {
 
     await waitFor(() => { expect(onError).toHaveBeenCalledTimes(1); }, { timeout: 10000 });
     expect((onError.mock.calls[0][0] as Error).message).toContain('404');
+  }, 15000);
+
+  it('refuses a file over limits.maxBytes before parsing, with FileTooLargeError', async () => {
+    const onError = vi.fn();
+    const file = createCsvFile(sampleCsv);
+
+    render(<SheetViewer source={file} limits={{ maxBytes: 8 }} onError={onError} height={600} width={800} />);
+
+    await waitFor(() => { expect(onError).toHaveBeenCalledTimes(1); }, { timeout: 10000 });
+    expect(onError.mock.calls[0][0]).toBeInstanceOf(FileTooLargeError);
+    await waitFor(() => {
+      expect(document.querySelector('.sv-error-overlay')?.textContent).toContain(FILE_TOO_LARGE_MESSAGE);
+    });
   }, 15000);
 
   it('is not called for a file that loads', async () => {

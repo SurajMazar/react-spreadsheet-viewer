@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef as useReactRef, forwardRef, useImperativeHandle, type Ref, type CSSProperties } from 'react';
 import { ViewerProvider, useViewerStore, useViewerStoreApi } from './context/ViewerContext';
 import { useSourceLoader } from './hooks/useSourceLoader';
+import { resolveSheetLimits } from './utils/sheetBounds';
 import { useFileParser } from './hooks/useFileParser';
 import { useKeyboardLockdown } from './hooks/useKeyboardLockdown';
 import { parseRangeExpression } from './utils/rangeParser';
@@ -86,7 +87,10 @@ function SheetViewerInner({
   forwardedRef,
 }: SheetViewerInnerProps) {
   const storeApi = useViewerStoreApi();
-  const { buffer, fileName, isLoading: sourceLoading, error: sourceError, cause: sourceCause } = useSourceLoader(source);
+  const { buffer, fileName, isLoading: sourceLoading, error: sourceError, cause: sourceCause } = useSourceLoader(
+    source,
+    resolveSheetLimits(limits).maxBytes,
+  );
 
   // Latest onError, so an inline callback neither re-runs the effect below nor
   // changes parseBuffer's identity (which would re-parse the file).

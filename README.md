@@ -149,7 +149,7 @@ The `source` prop accepts multiple formats:
 | `searchable` | `boolean` | `true` | Enable Ctrl+F search |
 | `tabNavigation` | `boolean` | `true` | Enable Tab / Shift+Tab to move between cells |
 | `keyboardInteractions` | `boolean \| SheetViewerKeyboardConfig` | `true` | Turn the viewer's keyboard shortcuts and grid navigation off, all at once or by group. See [Keyboard interactions](#keyboard-interactions) |
-| `limits` | `SheetViewerLimits` | `{ maxRows: 1048576, maxCols: 16384, maxCells: 2000000 }` | Per-sheet parse limits. A sheet over them shows "This sheet is too large to preview" instead of being parsed; other sheets load normally. See [Large and malformed files](#large-and-malformed-files) |
+| `limits` | `SheetViewerLimits` | `{ maxRows: 1048576, maxCols: 16384, maxCells: 4000000, maxBytes: 52428800 }` | Parse limits. A sheet over them shows "This sheet is too large to preview" instead of being parsed; other sheets load normally. A file over `maxBytes` is refused before parsing. See [Large and malformed files](#large-and-malformed-files) |
 | `onError` | `(error: Error) => void` | — | Called when the source fails to load or the file fails to parse. The built-in error message still shows |
 | `height` | `number \| string` | `'100%'` | Container height (px or CSS value) |
 | `width` | `number \| string` | `'100%'` | Container width (px or CSS value) |
@@ -796,9 +796,22 @@ The used range is then held to `limits`. A sheet over any limit is not parsed: i
 |---|---|---|
 | `maxRows` | `1048576` | Most rows a sheet may span (last used row + 1) — Excel's maximum |
 | `maxCols` | `16384` | Most columns a sheet may span (last used column + 1) — Excel's maximum |
-| `maxCells` | `2000000` | Most cells parsed for one sheet (used rows × columns up to the last used one); also caps a sheet's total merged area |
+| `maxCells` | `4000000` | Most cells parsed for one sheet (used rows × columns up to the last used one); also caps a sheet's total merged area |
+| `maxBytes` | `52428800` (50 MB) | Largest file read at all. Checked before parsing — and, for a URL that declares its size, before downloading. A file over it fails with `FileTooLargeError` ("This file is too large to preview."): the built-in error shows and `onError` is called |
 
-Limits are read when a file is parsed; changing them does not re-parse the current file. `DEFAULT_SHEET_LIMITS` is exported.
+Limits are read when a file is loaded and parsed; changing them does not re-parse the current file. `DEFAULT_SHEET_LIMITS`, `FileTooLargeError` and `FILE_TOO_LARGE_MESSAGE` are exported.
+
+Why both a cell and a byte limit: SheetJS parses the whole workbook before any per-sheet limit can be applied, so `maxCells` alone does not bound the cost of a genuinely large file — measured in Chrome on Apple silicon, refusing a 4M-cell sheet under a 2M limit still took ~22 s and ~1.8 GB. `maxBytes` stops it before that work starts.
+
+| Cells (20 columns) | File | Parse | JS heap |
+|---|---|---|---|
+| 0.5M | 5 MB | 2.9 s | 211 MB |
+| 1M | 10 MB | 5.1 s | 526 MB |
+| 2M | 21 MB | 13.2 s | 719 MB |
+| 3M | 32 MB | 20.2 s | 1.2 GB |
+| 4M | 42 MB | 25.8 s | 1.6 GB |
+
+Parsing runs on the main thread, so the tab is unresponsive for most of that time. Lower the limits for screens where that matters.
 
 ---
 

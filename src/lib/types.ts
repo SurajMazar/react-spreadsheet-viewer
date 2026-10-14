@@ -388,9 +388,18 @@ export interface SheetViewerLimits {
   maxCols?: number;
   /**
    * Most cells the parser will build for one sheet: used rows × columns up to
-   * the last used one. Also caps the sheet's total merged area. Default: 2,000,000
+   * the last used one. Also caps the sheet's total merged area. Default: 4,000,000
    */
   maxCells?: number;
+  /**
+   * Largest file the viewer will read, in bytes. Checked before the file is
+   * parsed (and, for a URL whose response declares its size, before it is
+   * downloaded), so an oversized file is refused at once instead of after a
+   * long parse. A file over it fails with {@link FileTooLargeError}: the
+   * built-in error message shows and `onError` is called.
+   * Default: 52,428,800 (50 MB)
+   */
+  maxBytes?: number;
 }
 
 /** Receives the error when the source fails to load or the file fails to parse. */

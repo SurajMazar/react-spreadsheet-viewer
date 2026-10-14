@@ -162,7 +162,8 @@ async function parseExcelBuffer(
 
   try {
     const { extractSheetStyles } = await import('../utils/styleExtractor');
-    const sheetStyles = extractSheetStyles(buffer, sheetNames);
+    // A refused sheet shows no grid, so reading its styles is wasted work.
+    const sheetStyles = extractSheetStyles(buffer, sheetNames, (name) => !!sheets[name]?.tooLarge);
     for (const name of sheetNames) {
       if (sheetStyles[name] && sheets[name] && !sheets[name].tooLarge) {
         sheets[name].styles = sheetStyles[name];
