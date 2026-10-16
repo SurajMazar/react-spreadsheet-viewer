@@ -33,6 +33,12 @@ export interface SheetData {
   styles?: Record<string, CellStyle>;
   /** Sparse map of cell comments keyed by "row,col". */
   comments?: Record<string, CellComment>;
+  /**
+   * Sparse map of the workbook's hyperlinks keyed by "row,col". Only links
+   * with a safe target (absolute `http:`, `https:`, `mailto:` or `tel:`) are
+   * kept; any other link's cell renders as plain text.
+   */
+  hyperlinks?: Record<string, CellHyperlink>;
   /** Conditional formatting rules for the sheet */
   conditionalFormats?: ConditionalFormatRule[];
   /** Sparse map of data validation rules keyed by "row,col" */
@@ -60,6 +66,14 @@ export interface CellStyle {
 export interface CellComment {
   author?: string;
   text: string;
+}
+
+/** A hyperlink read from the workbook, already checked to be safe to open. */
+export interface CellHyperlink {
+  /** Normalized absolute URL (`http:`, `https:`, `mailto:` or `tel:`). */
+  href: string;
+  /** The link's screen tip from the workbook, if it has one. */
+  tooltip?: string;
 }
 
 /** Conditional formatting rule types */
@@ -210,6 +224,8 @@ export interface SheetViewerTheme {
   primaryColor?: string;
   /** Light variant of primary (focus rings, etc.) */
   primaryLightColor?: string;
+  /** Color of workbook hyperlinks in cells */
+  linkColor?: string;
   /** Very light primary background (active button backgrounds) */
   primaryBgColor?: string;
   /** Range selection fill color */

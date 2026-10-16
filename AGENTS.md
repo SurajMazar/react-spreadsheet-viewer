@@ -648,6 +648,9 @@ Draggable resize handles on column and row headers. Column handles on the right 
 ### Text Wrapping
 Cells with `wrapText: true` in their `CellStyle` render with `white-space: normal` and word wrapping. The `.sv-cell-text-wrap` CSS class enables multi-line display.
 
+### Hyperlinks
+Workbook hyperlinks (SheetJS `cell.l`) are read in `worksheetToSheetData` via `extractHyperlinks` (`src/lib/utils/hyperlinks.ts`) into `SheetData.hyperlinks` (sparse, keyed `"row,col"`, type `CellHyperlink`). A workbook is untrusted content, so `getSafeLinkHref` keeps only absolute `http:`/`https:`/`mailto:`/`tel:` targets (checked with the WHATWG URL parser, normalized `href` returned); everything else is dropped and its cell renders as plain text. `Cell` re-checks before rendering `<a target="_blank" rel="noopener noreferrer">`. In edit mode a plain click on a link is `preventDefault`ed (selects the cell); Ctrl/Cmd+click opens it. Only cells SheetJS created are visited, never the declared rectangle. Theme field `linkColor` → `--sv-color-link`.
+
 ### Cell Comments
 Red triangle indicator in the top-right corner of cells with comments. Hover shows author and text via native `title` attribute. Store action: `setCellComment`. Imperative API: `ref.getCellComment("A1")`, `ref.setCellComment("A1", "text", "author")`. Comment type exported as `CellComment`.
 

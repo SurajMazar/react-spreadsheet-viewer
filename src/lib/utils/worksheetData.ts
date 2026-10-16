@@ -6,6 +6,7 @@
  */
 import type { WorkSheet, utils as SheetJsUtils } from 'xlsx';
 import { buildColWidths, type ColInfo } from './columnWidths';
+import { extractHyperlinks } from './hyperlinks';
 import { planSheetBounds, type ResolvedSheetLimits, type SheetRange } from './sheetBounds';
 import type { CellValue, SheetData } from '../types';
 
@@ -92,5 +93,8 @@ export function worksheetToSheetData(
     e: { r: m.e.r, c: m.e.c },
   }));
 
-  return { data, cols, rows, merges, colWidths };
+  const sheetData: SheetData = { data, cols, rows, merges, colWidths };
+  const hyperlinks = extractHyperlinks(worksheet, range, utils.decode_cell);
+  if (hyperlinks) sheetData.hyperlinks = hyperlinks;
+  return sheetData;
 }

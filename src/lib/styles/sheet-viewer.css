@@ -12,6 +12,7 @@
   --sv-color-text-secondary: #5f6368;
   --sv-color-text-muted: #80868b;
   --sv-color-primary: #1a73e8;
+  --sv-color-link: #1155cc;
   --sv-color-primary-light: #d2e3fc;
   --sv-color-primary-bg: #e8f0fe;
   --sv-color-green: #0f9d58;
@@ -819,6 +820,13 @@
 
 .sv-search-no-results {
   color: #c5221f;
+}
+
+/* Workbook hyperlinks (only safe http/https/mailto/tel targets are rendered as links) */
+.sv-cell-link {
+  color: var(--sv-color-link);
+  text-decoration: underline;
+  cursor: pointer;
 }
 
 /* Comment indicator (red triangle, top-right corner of cells with comments) */
