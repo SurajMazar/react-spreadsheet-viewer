@@ -40,6 +40,7 @@ A high-performance React component for viewing and editing Excel and CSV files w
 - **Merged cells** — visually renders merged cell ranges from Excel files
 - **Text wrapping** — cells with `wrapText` style render multi-line content
 - **Cell comments** — red triangle indicator with hover tooltip for commented cells
+- **Hyperlinks** — workbook links render as clickable links; only `http`, `https`, `mailto` and `tel` targets are allowed, anything else (e.g. `javascript:`) stays plain text
 - **Conditional formatting** — rule-based cell styling (value comparisons, color scales, data bars)
 - **Data validation** — input validation with dropdown lists, number/date ranges, and error UI
 - **Formula engine** — parse and evaluate Excel-style formulas (24 built-in functions: SUM, IF, VLOOKUP, etc.)
@@ -347,6 +348,7 @@ const darkTheme: SheetViewerTheme = {
 | `textMutedColor` | `--sv-color-text-muted` | Muted/placeholder text |
 | `primaryColor` | `--sv-color-primary` | Primary accent color |
 | `primaryLightColor` | `--sv-color-primary-light` | Light primary variant |
+| `linkColor` | `--sv-color-link` | Color of workbook hyperlinks |
 | `primaryBgColor` | `--sv-color-primary-bg` | Very light primary background |
 | `selectionColor` | `--sv-color-selection` | Range selection fill color |
 | `selectionHoverColor` | `--sv-color-selection-hover` | Range selection fill on hover |
@@ -855,6 +857,19 @@ ref.current?.setCellComment('A1', null);  // Remove
 
 ---
 
+## Hyperlinks
+
+Hyperlinks stored in the workbook (Excel's *Insert → Link*) render as clickable links in their cells and open in a new tab (`target="_blank"`, `rel="noopener noreferrer"`). Hovering shows the link's screen tip, or the URL when it has none.
+
+A workbook is untrusted content, so only absolute **`http:`, `https:`, `mailto:` and `tel:`** targets become links. Everything else — `javascript:`, `vbscript:`, `data:`, `file:`, `blob:`, relative paths and in-workbook links like `#Sheet2!A1` — renders as plain text. Targets are checked with the browser's own URL parser, so mixed case (`JaVaScRiPt:`), whitespace, control characters and encoded schemes can't sneak through.
+
+- **View mode:** click a link to open it.
+- **Edit mode:** a plain click selects the cell (so you can edit it); **Ctrl/Cmd + click** opens the link, as in Excel.
+
+Parsed links are available on `SheetData.hyperlinks` (keyed `"row,col"`, type `CellHyperlink`). The same check is exported as `getSafeLinkHref(url)` — it returns the normalized URL, or `null` when the value must not be used as a link. Link color follows the `linkColor` theme field (`--sv-color-link`).
+
+---
+
 ## Conditional Formatting
 
 ```typescript
@@ -927,6 +942,7 @@ import type {
   CellRange,
   CellValue,
   CellComment,
+  CellHyperlink,
   CellStyle,
   ChartOverlay,
   ChartSeries,

@@ -1,6 +1,7 @@
 import React, { memo, type CSSProperties, type MouseEvent } from 'react';
 import { isCellInRanges, getCellBorderInRanges } from '../../utils/rangeParser';
-import type { CellRange, ActiveCell, CellValue, CellStyle, CellComment, ParsedGridLineConfig } from '../../types';
+import { getSafeLinkHref } from '../../utils/hyperlinks';
+import type { CellRange, ActiveCell, CellValue, CellStyle, CellComment, CellHyperlink, ParsedGridLineConfig } from '../../types';
 
 export interface CellProps {
   rowIndex: number;
@@ -10,6 +11,13 @@ export interface CellProps {
   activeCell: ActiveCell | null;
   cellStyle?: CellStyle;
   comment?: CellComment;
+  /** Workbook hyperlink for this cell, already checked to be safe to open. */
+  hyperlink?: CellHyperlink;
+  /**
+   * When true (edit mode) a plain click on the link only selects the cell, as
+   * in Excel; Ctrl/Cmd+click opens it. In view mode a click opens it.
+   */
+  linkRequiresModifier?: boolean;
   isMerged?: boolean;
   onCellClick: (row: number, col: number) => void;
   onCellMouseDown: (e: MouseEvent, row: number, col: number) => void;
@@ -41,6 +49,8 @@ const Cell = memo(function Cell({
   activeCell,
   cellStyle,
   comment,
+  hyperlink,
+  linkRequiresModifier = false,
   isMerged,
   onCellClick,
   onCellMouseDown,
@@ -151,6 +161,11 @@ const Cell = memo(function Cell({
     }
   }
 
+  const text = value != null ? String(value) : '';
+  // Checked again here so a hand-built `SheetData` can't put an unsafe target
+  // on an anchor; the parser already drops those.
+  const linkHref = hyperlink ? getSafeLinkHref(hyperlink.href) : null;
+
   return (
     <div
       className={className}
@@ -164,7 +179,22 @@ const Cell = memo(function Cell({
     >
       {comment && <div className="sv-comment-indicator" title={`${comment.author ? comment.author + ': ' : ''}${comment.text}`} />}
       <span className={hasWrap ? 'sv-cell-text sv-cell-text-wrap' : 'sv-cell-text'}>
-        {value != null ? String(value) : ''}
+        {hyperlink && linkHref ? (
+          <a
+            className="sv-cell-link"
+            href={linkHref}
+            target="_blank"
+            rel="noopener noreferrer"
+            title={hyperlink.tooltip ?? linkHref}
+            onClick={(e) => {
+              if (linkRequiresModifier && !e.ctrlKey && !e.metaKey) e.preventDefault();
+            }}
+          >
+            {text}
+          </a>
+        ) : (
+          text
+        )}
       </span>
     </div>
   );

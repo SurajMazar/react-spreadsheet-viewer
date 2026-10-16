@@ -196,6 +196,7 @@ function SheetViewerInner({
     if (theme?.textMutedColor) vars['--sv-color-text-muted'] = theme.textMutedColor;
     if (theme?.primaryColor) vars['--sv-color-primary'] = theme.primaryColor;
     if (theme?.primaryLightColor) vars['--sv-color-primary-light'] = theme.primaryLightColor;
+    if (theme?.linkColor) vars['--sv-color-link'] = theme.linkColor;
     if (theme?.primaryBgColor) vars['--sv-color-primary-bg'] = theme.primaryBgColor;
     if (theme?.selectionColor) vars['--sv-color-selection'] = theme.selectionColor;
     if (theme?.selectionHoverColor) vars['--sv-color-selection-hover'] = theme.selectionHoverColor;

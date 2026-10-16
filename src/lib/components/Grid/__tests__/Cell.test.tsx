@@ -371,3 +371,76 @@ describe('Cell — Comment indicator', () => {
     expect(screen.getByText('Hello')).toBeTruthy();
   });
 });
+
+// =============================================
+// Hyperlinks
+// =============================================
+describe('Cell — Hyperlinks', () => {
+  it('renders a safe workbook link as an anchor that opens in a new tab', () => {
+    const { container } = renderCell({
+      value: 'Docsumo',
+      hyperlink: { href: 'https://docsumo.com/', tooltip: 'Open Docsumo' },
+    });
+    const link = container.querySelector('a.sv-cell-link') as HTMLAnchorElement;
+    expect(link).not.toBeNull();
+    expect(link.getAttribute('href')).toBe('https://docsumo.com/');
+    expect(link.getAttribute('target')).toBe('_blank');
+    expect(link.getAttribute('rel')).toBe('noopener noreferrer');
+    expect(link.getAttribute('title')).toBe('Open Docsumo');
+    expect(link.textContent).toBe('Docsumo');
+  });
+
+  it('uses the URL as the hover text when the link has no screen tip', () => {
+    const { container } = renderCell({ value: 'Email', hyperlink: { href: 'mailto:qa@example.test' } });
+    expect(container.querySelector('a.sv-cell-link')?.getAttribute('title')).toBe('mailto:qa@example.test');
+  });
+
+  it('renders plain text when the cell has no link', () => {
+    const { container } = renderCell({ value: 'https://not-a-link.example.com' });
+    expect(container.querySelector('a')).toBeNull();
+    expect(screen.getByText('https://not-a-link.example.com')).toBeTruthy();
+  });
+
+  it('never puts an unsafe target on an anchor, even from hand-built data', () => {
+    ['javascript:alert(1)', 'JaVaScRiPt:alert(1)', 'data:text/html,x', 'file:///etc/passwd', '#Sheet2!A1'].forEach(
+      (href) => {
+        const { container, unmount } = renderCell({ value: 'Click me', hyperlink: { href } });
+        expect(container.querySelector('a')).toBeNull();
+        expect(container.textContent).toContain('Click me');
+        unmount();
+      },
+    );
+  });
+
+  it('opens on a plain click in view mode', () => {
+    const { container } = renderCell({ value: 'Docsumo', hyperlink: { href: 'https://docsumo.com/' } });
+    const link = container.querySelector('a.sv-cell-link') as HTMLAnchorElement;
+    const click = new MouseEvent('click', { bubbles: true, cancelable: true });
+    link.dispatchEvent(click);
+    expect(click.defaultPrevented).toBe(false);
+  });
+
+  it('needs Ctrl/Cmd+click to open in edit mode, and a plain click still selects the cell', () => {
+    const onCellClick = vi.fn();
+    const { container } = renderCell({
+      value: 'Docsumo',
+      hyperlink: { href: 'https://docsumo.com/' },
+      linkRequiresModifier: true,
+      onCellClick,
+    });
+    const link = container.querySelector('a.sv-cell-link') as HTMLAnchorElement;
+
+    const plain = new MouseEvent('click', { bubbles: true, cancelable: true });
+    link.dispatchEvent(plain);
+    expect(plain.defaultPrevented).toBe(true);
+    expect(onCellClick).toHaveBeenCalledWith(0, 0);
+
+    const withCtrl = new MouseEvent('click', { bubbles: true, cancelable: true, ctrlKey: true });
+    link.dispatchEvent(withCtrl);
+    expect(withCtrl.defaultPrevented).toBe(false);
+
+    const withMeta = new MouseEvent('click', { bubbles: true, cancelable: true, metaKey: true });
+    link.dispatchEvent(withMeta);
+    expect(withMeta.defaultPrevented).toBe(false);
+  });
+});

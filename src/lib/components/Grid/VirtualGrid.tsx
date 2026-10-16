@@ -903,6 +903,7 @@ export default function VirtualGrid({
               // Look up cell style, comment, and conditional format
               let cellStyle = sheetData.styles?.[`${row},${col}`];
               const cellComment = sheetData.comments?.[`${row},${col}`];
+              const cellHyperlink = sheetData.hyperlinks?.[`${row},${col}`];
 
               // Overlay conditional formatting styles (if rules exist)
               if (sheetData.conditionalFormats && sheetData.conditionalFormats.length > 0) {
@@ -936,6 +937,8 @@ export default function VirtualGrid({
                   activeCell={highlightable ? activeCell : null}
                   cellStyle={cellStyle}
                   comment={cellComment}
+                  hyperlink={cellHyperlink}
+                  linkRequiresModifier={mode === 'edit'}
                   isMerged={!!mergeInfo}
                   onCellClick={onCellClick}
                   onCellMouseDown={onCellMouseDown}

@@ -11,6 +11,7 @@ export {
   AUTO_FIT_MAX_WIDTH,
 } from './utils/autoFit';
 export { DEFAULT_SHEET_LIMITS, FILE_TOO_LARGE_MESSAGE, FileTooLargeError } from './utils/sheetBounds';
+export { getSafeLinkHref } from './utils/hyperlinks';
 export type {
   SheetViewerTool,
   SheetViewerToolDefinition,
@@ -33,6 +34,7 @@ export type {
   CellRange,
   CellValue,
   CellComment,
+  CellHyperlink,
   CellStyle,
   ChartOverlay,
   ChartSeries,
