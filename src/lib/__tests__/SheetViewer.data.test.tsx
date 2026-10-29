@@ -3,7 +3,7 @@ import { render, waitFor, screen, act } from '@testing-library/react';
 import React, { createRef } from 'react';
 import { SheetViewer } from '../index';
 import Cell from '../components/Grid/Cell';
-import { withPinned } from '../components/Grid/VirtualGrid';
+import { offscreenMergeAnchors, withPinned } from '../components/Grid/VirtualGrid';
 import type { SheetViewerHandle, WorkbookInput, SheetViewerFormulaFunction } from '../types';
 
 beforeEach(() => {
@@ -219,5 +219,32 @@ describe('frozen panes', () => {
     );
     await waitFor(() => expect(ref.current?.getSheetNames()).toEqual(['S']));
     expect(ref.current!.getSheetData()).toMatchObject({ frozenRows: 2, frozenCols: 1 });
+  });
+});
+
+describe('merged cells scrolled partly out of view', () => {
+  const title = { s: { r: 1, c: 0 }, e: { r: 1, c: 14 } }; // A2:O2
+  const tall = { s: { r: 0, c: 3 }, e: { r: 20, c: 3 } }; // D1:D21
+
+  it('draws a merge whose top-left cell has scrolled out to the left', () => {
+    expect(offscreenMergeAnchors([title], [0, 1, 2], [6, 7, 8])).toEqual([title]);
+  });
+
+  it('draws a merge whose top-left cell has scrolled out above', () => {
+    expect(offscreenMergeAnchors([tall], [15, 16, 17], [2, 3, 4])).toEqual([tall]);
+  });
+
+  it('leaves merges alone when the normal loop draws their top-left cell', () => {
+    expect(offscreenMergeAnchors([title], [0, 1, 2], [0, 1, 2])).toEqual([]);
+  });
+
+  it('ignores merges entirely outside the window', () => {
+    expect(offscreenMergeAnchors([title], [10, 11], [0, 1])).toEqual([]);
+    expect(offscreenMergeAnchors([title], [0, 1], [20, 21])).toEqual([]);
+  });
+
+  it('handles no merges and an empty window', () => {
+    expect(offscreenMergeAnchors(undefined, [0], [0])).toEqual([]);
+    expect(offscreenMergeAnchors([title], [], [])).toEqual([]);
   });
 });

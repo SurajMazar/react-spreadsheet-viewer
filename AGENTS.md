@@ -633,6 +633,9 @@ Added to replace the Syncfusion spreadsheet in Docsumo's Excel review screen —
 - `textAlign` now also sets `justify-content` (the cell is a flex row, so `text-align` alone never moved the text). A list-validated cell's dropdown starts on the shown value, not the formula.
 - Demo: `?demo=data` (`src/demo/DataDemo.tsx`) shows all of the above on a P&L-shaped workbook.
 
+### Merged cells scrolled partly out of view (2.5.2)
+The grid draws a merged cell only from its top-left cell, and only cells inside the virtual window are drawn. A merge whose top-left cell had scrolled out (a title spanning A:O once column A left the view, or a tall merge once its first row did) vanished although most of it was on screen. After the normal loop, `offscreenMergeAnchors` (exported from VirtualGrid, unit-tested) lists merges that cross the window without their anchor, and the grid draws each one from the virtualizer's `measurementsCache` entry for that anchor cell.
+
 ### In-cell dropdown (2.5.1)
 List-validated cells edit through `Grid/DropdownEditor.tsx` instead of a native `<select>`: the cell with an arrow, and a `listbox` of the allowed values under it (`.sv-dropdown-list`, flipped upwards with `.sv-dropdown-list-up` when there is little room below in `.sv-grid-scroll`). The selected, editable list cell shows a `.sv-cell-dropdown-btn` (Cell's `showDropdownButton`/`onDropdownOpen`, wired in VirtualGrid) that opens the editor directly; its mousedown/dblclick stop propagating so they do not start a selection drag or a second edit. Items `preventDefault` on mousedown so the editor keeps focus; a blur to outside the editor cancels. No blank placeholder item, as in a spreadsheet's in-cell list.
 
