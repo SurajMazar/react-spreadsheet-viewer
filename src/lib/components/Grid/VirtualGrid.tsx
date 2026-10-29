@@ -17,6 +17,28 @@ import type { MergeCell, CellStyle, CellValueChange, CellStyleChange, ParsedGrid
 /** Base geometry, in unzoomed pixels. Every rendered size derives from these. */
 export const COL_WIDTH = 100;
 
+/**
+ * Merges that cross the rendered window but whose top-left cell is outside it.
+ * The window only draws a merged cell from its top-left cell, so without these
+ * a wide merge (a title spanning A:O) vanishes as soon as column A scrolls out
+ * of view, though most of it is still on screen.
+ */
+export function offscreenMergeAnchors(
+  merges: MergeCell[] | undefined,
+  rowIndexes: number[],
+  colIndexes: number[]
+): MergeCell[] {
+  if (!merges?.length || !rowIndexes.length || !colIndexes.length) return [];
+  const rows = new Set(rowIndexes);
+  const cols = new Set(colIndexes);
+  return merges.filter((m) => {
+    const rowHit = rowIndexes.some((i) => i >= m.s.r && i <= m.e.r);
+    const colHit = colIndexes.some((i) => i >= m.s.c && i <= m.e.c);
+    // The normal loop already draws it when its top-left cell is in the window.
+    return rowHit && colHit && !(rows.has(m.s.r) && cols.has(m.s.c));
+  });
+}
+
 /** The virtualizer's visible range plus the first `pinned` indexes, sorted. */
 export function withPinned(range: Range, pinned: number): number[] {
   const visible = defaultRangeExtractor(range);
@@ -976,17 +998,29 @@ export default function VirtualGrid({
   const topCells: React.ReactNode[] = [];
   const leftCells: React.ReactNode[] = [];
   const cornerCells: React.ReactNode[] = [];
+  const placeCell = (vr: VirtualItem, vc: VirtualItem) => {
+    const node = renderCell(vr, vc);
+    if (!node) return;
+    const inTop = vr.index < frozenRowCount;
+    const inLeft = vc.index < frozenColCount;
+    if (inTop && inLeft) cornerCells.push(node);
+    else if (inTop) topCells.push(node);
+    else if (inLeft) leftCells.push(node);
+    else bodyCells.push(node);
+  };
   for (const vr of virtualRows) {
-    for (const vc of virtualCols) {
-      const node = renderCell(vr, vc);
-      if (!node) continue;
-      const inTop = vr.index < frozenRowCount;
-      const inLeft = vc.index < frozenColCount;
-      if (inTop && inLeft) cornerCells.push(node);
-      else if (inTop) topCells.push(node);
-      else if (inLeft) leftCells.push(node);
-      else bodyCells.push(node);
-    }
+    for (const vc of virtualCols) placeCell(vr, vc);
+  }
+  // Merged cells whose top-left cell has scrolled out of the window are still
+  // drawn whole, from the measured position of that cell.
+  for (const m of offscreenMergeAnchors(
+    sheetData.merges,
+    virtualRows.map((v) => v.index),
+    virtualCols.map((v) => v.index)
+  )) {
+    const vr = rowVirtualizer.measurementsCache[m.s.r];
+    const vc = colVirtualizer.measurementsCache[m.s.c];
+    if (vr && vc) placeCell(vr, vc);
   }
 
   return (
