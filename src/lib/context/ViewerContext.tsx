@@ -20,7 +20,10 @@ import type {
   SheetViewerMode,
   CellRange,
   UndoEntry,
+  SheetCellInput,
+  SheetViewerFormulaFunction,
 } from '../types';
+import { recalculateSheet as recalculateSheetData } from '../formula/recalculate';
 
 /**
  * Stable empty objects to avoid creating new references in selectors.
@@ -32,6 +35,71 @@ export const EMPTY_SELECTION: SelectionState = Object.freeze({
 }) as SelectionState;
 
 export const EMPTY_RANGES: CellRange[] = Object.freeze([]) as unknown as CellRange[];
+
+/**
+ * Write one value into a sheet, without recalculating. A string starting with
+ * `=` (and longer than that) becomes the cell's formula; any other value
+ * clears a formula the cell had.
+ */
+function writeCellValue(sheet: SheetData, row: number, col: number, value: CellValue): SheetData {
+  const key = `${row},${col}`;
+  const isFormula = typeof value === 'string' && value.length > 1 && value.startsWith('=');
+
+  let formulas = sheet.formulas;
+  if (isFormula) {
+    formulas = { ...(formulas || {}), [key]: value as string };
+  } else if (formulas && formulas[key] !== undefined) {
+    const { [key]: _removed, ...rest } = formulas;
+    formulas = rest;
+  }
+
+  // Extend data array to accommodate the target cell if needed
+  const newData = sheet.data.slice();
+  while (newData.length <= row) newData.push([]);
+  const targetRow = [...newData[row]];
+  while (targetRow.length <= col) targetRow.push(null);
+  // A formula cell holds its result; until recalculation fills it in, keep
+  // the previous value rather than flashing the formula text.
+  targetRow[col] = isFormula ? (sheet.data[row]?.[col] ?? null) : value;
+  newData[row] = targetRow;
+
+  const next: SheetData = {
+    ...sheet,
+    data: newData,
+    rows: Math.max(sheet.rows, row + 1),
+    cols: Math.max(sheet.cols, col + 1),
+  };
+  if (formulas !== sheet.formulas) next.formulas = formulas;
+  return next;
+}
+
+/**
+ * The `lastCellChange` an undo/redo entry produces: its first value change,
+ * or the previous one untouched when the entry only changed styles.
+ */
+function changeFor(
+  entry: UndoEntry,
+  prev: ViewerState['lastCellChange'],
+): ViewerState['lastCellChange'] {
+  const first = entry.cellChanges[0];
+  if (!first) return prev;
+  return { sheetName: entry.sheetName, row: first.row, col: first.col, seq: (prev?.seq ?? 0) + 1 };
+}
+
+/** Replace or remove one entry of a sparse "row,col" map. */
+function withEntry<T>(map: Record<string, T> | undefined, key: string, value: T | null | undefined): Record<string, T> {
+  if (value === null || value === undefined) {
+    if (!map || map[key] === undefined) return map || {};
+    const { [key]: _removed, ...rest } = map;
+    return rest;
+  }
+  return { ...(map || {}), [key]: value };
+}
+
+/** The value a cell would show in an editor: its formula, else its value. */
+export function getCellInputValue(sheet: SheetData, row: number, col: number): CellValue {
+  return sheet.formulas?.[`${row},${col}`] ?? sheet.data[row]?.[col] ?? null;
+}
 
 const ViewerContext = createContext<StoreApi<ViewerState> | null>(null);
 
@@ -84,6 +152,10 @@ export function createViewerStore(): StoreApi<ViewerState> {
     // Mode
     mode: 'view' as SheetViewerMode,
 
+    // Formulas
+    customFunctions: {},
+    lastCellChange: null,
+
     // Actions
     setParseProgress: (progress: number, status?: string) =>
       set({ parseProgress: progress, parseStatus: status || '' }),
@@ -100,11 +172,16 @@ export function createViewerStore(): StoreApi<ViewerState> {
       sheets: Record<string, SheetData>;
       images?: Record<string, unknown>;
       chartOverlays?: Record<string, ChartOverlay[]>;
-    }) =>
+    }) => {
+      const { customFunctions } = get();
+      const sheets: Record<string, SheetData> = {};
+      for (const [name, sheet] of Object.entries(payload.sheets)) {
+        sheets[name] = recalculateSheetData(sheet, customFunctions);
+      }
       set({
         fileName: payload.fileName,
         sheetNames: payload.sheetNames,
-        sheets: payload.sheets,
+        sheets,
         images: payload.images || {},
         chartOverlays: payload.chartOverlays || {},
         activeSheet: payload.sheetNames[0] || null,
@@ -114,7 +191,9 @@ export function createViewerStore(): StoreApi<ViewerState> {
         parseError: null,
         selections: {},
         activeCell: null,
-      }),
+        lastCellChange: null,
+      });
+    },
 
     setActiveSheet: (sheetName: string) => set({ activeSheet: sheetName }),
 
@@ -158,32 +237,96 @@ export function createViewerStore(): StoreApi<ViewerState> {
       });
     },
 
-    setCellValue: (sheetName: string, row: number, col: number, value: CellValue) => {
+    setCellValue: (
+      sheetName: string,
+      row: number,
+      col: number,
+      value: CellValue,
+      options?: { silent?: boolean },
+    ) => {
       const state = get();
       const sheet = state.sheets[sheetName];
       if (!sheet) return;
 
-      // Extend data array to accommodate the target cell if needed
-      const newData = sheet.data.map((r) => [...r]);
-      while (newData.length <= row) {
-        newData.push([]);
+      const next = recalculateSheetData(writeCellValue(sheet, row, col, value), state.customFunctions);
+      const update: Partial<ViewerState> = { sheets: { ...state.sheets, [sheetName]: next } };
+      if (!options?.silent) {
+        update.lastCellChange = { sheetName, row, col, seq: (state.lastCellChange?.seq ?? 0) + 1 };
       }
-      const targetRow = [...newData[row]];
-      while (targetRow.length <= col) {
-        targetRow.push(null);
+      set(update);
+    },
+
+    updateCell: (
+      sheetName: string,
+      row: number,
+      col: number,
+      cellUpdate: SheetCellInput,
+      options?: { silent?: boolean },
+    ) => {
+      const state = get();
+      const sheet = state.sheets[sheetName];
+      if (!sheet) return;
+      const key = `${row},${col}`;
+
+      let next = sheet;
+      const touchesValue = 'value' in cellUpdate || 'formula' in cellUpdate;
+      if (cellUpdate.formula) {
+        const formula = cellUpdate.formula.startsWith('=') ? cellUpdate.formula : `=${cellUpdate.formula}`;
+        next = writeCellValue(next, row, col, formula);
+      } else if ('value' in cellUpdate) {
+        next = writeCellValue(next, row, col, cellUpdate.value ?? null);
+      } else if ('formula' in cellUpdate) {
+        // `formula: ''`/`undefined` clears the formula and keeps its last result.
+        next = writeCellValue(next, row, col, next.data[row]?.[col] ?? null);
       }
-      targetRow[col] = value;
-      newData[row] = targetRow;
+      if ('format' in cellUpdate) next = { ...next, formats: withEntry(next.formats, key, cellUpdate.format || null) };
+      if ('style' in cellUpdate) {
+        const merged = cellUpdate.style ? { ...(next.styles?.[key] || {}), ...cellUpdate.style } : null;
+        next = { ...next, styles: withEntry(next.styles, key, merged) };
+      }
+      if ('meta' in cellUpdate) next = { ...next, meta: withEntry(next.meta, key, cellUpdate.meta ?? null) };
+      if ('validation' in cellUpdate) {
+        next = { ...next, validations: withEntry(next.validations, key, cellUpdate.validation ?? null) };
+      }
+      if ('comment' in cellUpdate) next = { ...next, comments: withEntry(next.comments, key, cellUpdate.comment ?? null) };
+      if (next === sheet) return;
 
-      const newRows = Math.max(sheet.rows, row + 1);
-      const newCols = Math.max(sheet.cols, col + 1);
+      if (touchesValue) next = recalculateSheetData(next, state.customFunctions);
+      const update: Partial<ViewerState> = { sheets: { ...state.sheets, [sheetName]: next } };
+      if (touchesValue && !options?.silent) {
+        update.lastCellChange = { sheetName, row, col, seq: (state.lastCellChange?.seq ?? 0) + 1 };
+      }
+      set(update);
+    },
 
-      set({
-        sheets: {
-          ...state.sheets,
-          [sheetName]: { ...sheet, data: newData, rows: newRows, cols: newCols },
-        },
-      });
+    setCustomFunctions: (functions: Record<string, SheetViewerFormulaFunction> | undefined) => {
+      const state = get();
+      const normalized: Record<string, SheetViewerFormulaFunction> = {};
+      for (const [name, fn] of Object.entries(functions || {})) {
+        if (typeof fn === 'function') normalized[name.toUpperCase()] = fn;
+      }
+      const prevNames = Object.keys(state.customFunctions);
+      const nextNames = Object.keys(normalized);
+      const unchanged =
+        prevNames.length === nextNames.length &&
+        nextNames.every((name) => state.customFunctions[name] === normalized[name]);
+      if (unchanged) return;
+
+      let sheetsChanged = false;
+      const sheets: Record<string, SheetData> = {};
+      for (const [name, sheet] of Object.entries(state.sheets)) {
+        sheets[name] = recalculateSheetData(sheet, normalized);
+        if (sheets[name] !== sheet) sheetsChanged = true;
+      }
+      set(sheetsChanged ? { customFunctions: normalized, sheets } : { customFunctions: normalized });
+    },
+
+    recalculateSheet: (sheetName: string) => {
+      const state = get();
+      const sheet = state.sheets[sheetName];
+      if (!sheet) return;
+      const next = recalculateSheetData(sheet, state.customFunctions);
+      if (next !== sheet) set({ sheets: { ...state.sheets, [sheetName]: next } });
     },
 
     toggleChartPanel: () => set((s) => ({ showChartPanel: !s.showChartPanel })),
@@ -320,16 +463,14 @@ export function createViewerStore(): StoreApi<ViewerState> {
       const sheet = state.sheets[entry.sheetName];
       if (!sheet) return;
 
-      // Reverse value changes
-      const newData = sheet.data.map((r) => [...r]);
+      // Reverse value changes (formula text in an entry restores the formula)
+      let nextSheet = sheet;
       for (const ch of entry.cellChanges) {
-        while (newData.length <= ch.row) newData.push([]);
-        while (newData[ch.row].length <= ch.col) newData[ch.row].push(null);
-        newData[ch.row][ch.col] = ch.oldValue;
+        nextSheet = writeCellValue(nextSheet, ch.row, ch.col, ch.oldValue);
       }
 
       // Reverse style changes
-      const newStyles = { ...(sheet.styles || {}) };
+      const newStyles = { ...(nextSheet.styles || {}) };
       for (const ch of entry.styleChanges) {
         const key = `${ch.row},${ch.col}`;
         if (ch.oldStyle === undefined) {
@@ -344,8 +485,9 @@ export function createViewerStore(): StoreApi<ViewerState> {
         redoStack: [...state.redoStack, entry],
         sheets: {
           ...state.sheets,
-          [entry.sheetName]: { ...sheet, data: newData, styles: newStyles },
+          [entry.sheetName]: recalculateSheetData({ ...nextSheet, styles: newStyles }, state.customFunctions),
         },
+        lastCellChange: changeFor(entry, state.lastCellChange),
       });
     },
 
@@ -356,16 +498,14 @@ export function createViewerStore(): StoreApi<ViewerState> {
       const sheet = state.sheets[entry.sheetName];
       if (!sheet) return;
 
-      // Re-apply value changes
-      const newData = sheet.data.map((r) => [...r]);
+      // Re-apply value changes (formula text in an entry restores the formula)
+      let nextSheet = sheet;
       for (const ch of entry.cellChanges) {
-        while (newData.length <= ch.row) newData.push([]);
-        while (newData[ch.row].length <= ch.col) newData[ch.row].push(null);
-        newData[ch.row][ch.col] = ch.newValue;
+        nextSheet = writeCellValue(nextSheet, ch.row, ch.col, ch.newValue);
       }
 
       // Re-apply style changes
-      const newStyles = { ...(sheet.styles || {}) };
+      const newStyles = { ...(nextSheet.styles || {}) };
       for (const ch of entry.styleChanges) {
         const key = `${ch.row},${ch.col}`;
         if (ch.newStyle === undefined) {
@@ -380,8 +520,9 @@ export function createViewerStore(): StoreApi<ViewerState> {
         undoStack: [...state.undoStack, entry],
         sheets: {
           ...state.sheets,
-          [entry.sheetName]: { ...sheet, data: newData, styles: newStyles },
+          [entry.sheetName]: recalculateSheetData({ ...nextSheet, styles: newStyles }, state.customFunctions),
         },
+        lastCellChange: changeFor(entry, state.lastCellChange),
       });
     },
 
@@ -406,6 +547,7 @@ export function createViewerStore(): StoreApi<ViewerState> {
         searchActiveIndex: 0,
         undoStack: [],
         redoStack: [],
+        lastCellChange: null,
       }),
   }));
 }

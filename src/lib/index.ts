@@ -12,6 +12,9 @@ export {
 } from './utils/autoFit';
 export { DEFAULT_SHEET_LIMITS, FILE_TOO_LARGE_MESSAGE, FileTooLargeError } from './utils/sheetBounds';
 export { getSafeLinkHref } from './utils/hyperlinks';
+export { buildSheetFromRows, buildWorkbook, sheetToCellRows } from './utils/workbookInput';
+export { formatCellValue, excelSerialToDate } from './utils/numberFormat';
+export { recalculateSheet } from './formula/recalculate';
 export type {
   SheetViewerTool,
   SheetViewerToolDefinition,
@@ -36,6 +39,13 @@ export type {
   CellComment,
   CellHyperlink,
   CellStyle,
+  CellBorders,
+  CellMeta,
+  SheetCellInput,
+  SheetInput,
+  WorkbookInput,
+  SheetViewerFormulaFunction,
+  FormulaArgument,
   ChartOverlay,
   ChartSeries,
   ChartType,

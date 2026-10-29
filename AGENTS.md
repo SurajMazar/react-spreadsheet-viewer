@@ -608,9 +608,11 @@ npm publish --otp=<code>    # Requires 2FA OTP from authenticator app
 
 - **No Web Worker parsing** — parsing is main-thread with rAF yields. For truly massive files (500k+ rows), a Worker-based approach may be needed.
 - **No dark mode** — CSS variables are defined but only light theme values exist.
-- **No row/column freeze** — only sticky headers, no user-defined freeze panes.
+- **Freeze panes only through `data`** — `frozenRows`/`frozenCols` on a `SheetInput` are honoured; panes frozen in an `.xlsx` file are not read. The highlight-area anchor (`highlightAreaRef`) is placed in scrolling content coordinates, so over a frozen range it does not follow the pinned cells.
 - **No sort/filter** — data is displayed as-is from the file.
-- **Hidden columns render** — `hidden="1"` on a `<col>` is not honoured; such columns render at the default width.
+- **Hidden columns in files render** — `hidden="1"` on a `<col>` in an `.xlsx` is not honoured; such columns render at the default width. (`hiddenCols` given through the `data` prop is honoured.)
+- **File formulas are not re-evaluated** — `.xlsx` cells show their cached values; only formulas from `data` or typed in edit mode are evaluated.
+- **Number formats** — only the formats Docsumo's data uses (`0.00`-style decimals, `#,##0`, `%`, `@`, serial dates). Others show the raw value.
 - **Row heights are not preserved** — `!rows` is available now that `cellStyles: true` is set, but is not read.
 - **Image extraction** — SheetJS `!images` support is limited; images may not render for all files.
 - **README.md** — comprehensive; update if the public API changes.
@@ -618,6 +620,18 @@ npm publish --otp=<code>    # Requires 2FA OTP from authenticator app
 ## 16. Recently Added Features
 
 These features were added after the initial release:
+
+### Workbook from data, custom formulas, programmatic cell updates (2.5.0)
+Added to replace the Syncfusion spreadsheet in Docsumo's Excel review screen — only what that screen uses, nothing more.
+- `data` prop (`WorkbookInput`): sheets of `SheetCellInput` cells (`value`, `formula`, `format`, `style`, `meta`, `validation`, `comment`, `colSpan`/`rowSpan`) plus `colWidths`, `rowHeights`, `hiddenCols`, `readOnly`, `merges`. Built by `utils/workbookInput.ts` (`buildWorkbook`, `buildSheetFromRows`); `sheetToCellRows` is the inverse and backs `getCellRows()`. `data` wins over `source` (the source is not fetched).
+- `SheetData` gained `formulas`, `formats`, `meta`, `hiddenCols`, `readOnly`. `CellStyle` gained `borders` (CSS border strings per side, drawn under the selection outline).
+- Formulas: `formula/recalculate.ts` evaluates `sheet.formulas` on demand with memoisation and cycle detection, upper-cases outside string literals, and writes results into `data`. The store recalculates on load, on every value write, on undo/redo and when `customFunctions` change. `evaluate()` takes the function table as a parameter and turns a throwing function into `#VALUE!`.
+- Store: `setCellValue(…, { silent })` — a `=` string becomes a formula; `updateCell`; `setCustomFunctions`; `recalculateSheet`; `lastCellChange` (`seq` increments) which `onCellChange` now follows, so paste and undo report the right cell and handle updates never fire it. Undo entries record a formula cell's formula text (`getCellInputValue`), so undo restores the formula.
+- Grid: `readOnly` blocks editing and paste even in edit mode; hidden columns get width 0 and are not rendered; `Cell` renders through `formatCellValue` (`utils/numberFormat.ts`); the editor and formula bar show a cell's formula.
+- Handle: `setCellValue`, `setCellStyle` (range), `updateCell`, `getCellMeta`, `getCellRows`, `recalculate`.
+- Frozen panes (`frozenRows`/`frozenCols`): the virtualizers pin the frozen indexes with a `rangeExtractor` (`withPinned`) and use `scrollPaddingStart` so scrollToIndex treats cells under the frozen band as hidden. Frozen cells render in three zero-sized, in-flow `position: sticky` layers inside the sizer (`.sv-frozen-top/-left/-corner`), so they keep content coordinates and need no scroll listener. Frozen headers are separate, non-translated header bands (`.sv-col-headers-frozen`, `.sv-row-headers-frozen`). Clicking a frozen cell does not scroll that axis. The divider is an inset box-shadow (`--sv-color-frozen-line`).
+- `textAlign` now also sets `justify-content` (the cell is a flex row, so `text-align` alone never moved the text). A list-validated cell's dropdown starts on the shown value, not the formula.
+- Demo: `?demo=data` (`src/demo/DataDemo.tsx`) shows all of the above on a P&L-shaped workbook.
 
 ### Custom Loading UI
 `renderLoading` replaces the built-in card, receiving `{ progress, status, fileName, isFetching }`. It renders inside the viewer's own `.sv-loading-overlay`, so consumers describe content only; returning `null` shows nothing.

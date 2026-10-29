@@ -1,12 +1,15 @@
 import React, { memo, type CSSProperties, type MouseEvent } from 'react';
 import { isCellInRanges, getCellBorderInRanges } from '../../utils/rangeParser';
 import { getSafeLinkHref } from '../../utils/hyperlinks';
+import { formatCellValue } from '../../utils/numberFormat';
 import type { CellRange, ActiveCell, CellValue, CellStyle, CellComment, CellHyperlink, ParsedGridLineConfig } from '../../types';
 
 export interface CellProps {
   rowIndex: number;
   columnIndex: number;
   value: CellValue;
+  /** Number format the value is displayed through (`"0.00"`, `"dd/mm/yyyy"` …). */
+  format?: string;
   ranges: CellRange[];
   activeCell: ActiveCell | null;
   cellStyle?: CellStyle;
@@ -45,6 +48,7 @@ const Cell = memo(function Cell({
   rowIndex,
   columnIndex,
   value,
+  format,
   ranges,
   activeCell,
   cellStyle,
@@ -108,7 +112,24 @@ const Cell = memo(function Cell({
     // Scaled by the zoom variable so a cell carrying an explicit Excel font size
     // zooms with the rest of the grid instead of staying pinned at 100%.
     if (cellStyle.fontSize) mergedStyle.fontSize = `calc(${cellStyle.fontSize}pt * var(--sv-zoom))`;
-    if (cellStyle.textAlign) mergedStyle.textAlign = cellStyle.textAlign;
+    if (cellStyle.textAlign) {
+      mergedStyle.textAlign = cellStyle.textAlign;
+      // The cell is a flex row, so text-align alone does not move the text span.
+      mergedStyle.justifyContent =
+        cellStyle.textAlign === 'right' ? 'flex-end' : cellStyle.textAlign === 'center' ? 'center' : 'flex-start';
+    }
+    // Cell borders go on before the selection borders below, so a selected
+    // cell still reads as selected.
+    const cb = cellStyle.borders;
+    if (cb) {
+      if (cb.top) mergedStyle.borderTop = cb.top;
+      if (cb.right) mergedStyle.borderRight = cb.right;
+      if (cb.bottom) mergedStyle.borderBottom = cb.bottom;
+      if (cb.left) mergedStyle.borderLeft = cb.left;
+      // A cell's top/left borders sit over its neighbour's grid line; lift it
+      // so the coloured edge is not covered.
+      if (cb.top || cb.left) mergedStyle.zIndex = Math.max(Number(mergedStyle.zIndex ?? 0), 1);
+    }
   }
 
   // Apply highlight fill color inline so it wins over cellStyle.bgColor and CSS classes
@@ -161,7 +182,7 @@ const Cell = memo(function Cell({
     }
   }
 
-  const text = value != null ? String(value) : '';
+  const text = format ? formatCellValue(value, format) : value != null ? String(value) : '';
   // Checked again here so a hand-built `SheetData` can't put an unsafe target
   // on an anchor; the parser already drops those.
   const linkHref = hyperlink ? getSafeLinkHref(hyperlink.href) : null;
@@ -175,7 +196,7 @@ const Cell = memo(function Cell({
       onMouseDown={(e) => onCellMouseDown(e, rowIndex, columnIndex)}
       onMouseEnter={(e) => onCellMouseEnter(e, rowIndex, columnIndex)}
       onDoubleClick={() => onCellDoubleClick?.(rowIndex, columnIndex)}
-      title={String(value ?? '')}
+      title={text}
     >
       {comment && <div className="sv-comment-indicator" title={`${comment.author ? comment.author + ': ' : ''}${comment.text}`} />}
       <span className={hasWrap ? 'sv-cell-text sv-cell-text-wrap' : 'sv-cell-text'}>

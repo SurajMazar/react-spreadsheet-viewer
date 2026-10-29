@@ -8,6 +8,7 @@
   --sv-color-surface: #f8f9fa;
   --sv-color-border: #e0e0e0;
   --sv-color-border-light: #e8eaed;
+  --sv-color-frozen-line: #bdc1c6;
   --sv-color-text: #202124;
   --sv-color-text-secondary: #5f6368;
   --sv-color-text-muted: #80868b;
@@ -851,6 +852,57 @@
    z-index sits above every cell decoration (merged 2, range border 3, search 4,
    active 5) but below the copy indicator and chart overlays (10), so a consumer
    who styles this class draws over the tints without covering those. */
+/* Frozen panes. Zero-sized, in-flow layers inside the grid's sizer: CSS sticky
+   pins each one to the viewport edge, and its cells — absolutely placed in
+   content coordinates — ride along. Above the scrolling cells, which pass
+   underneath. */
+.sv-frozen-layer {
+  position: sticky;
+  width: 0;
+  height: 0;
+  overflow: visible;
+}
+
+.sv-frozen-top {
+  top: 0;
+  z-index: 8;
+}
+
+.sv-frozen-left {
+  left: 0;
+  z-index: 8;
+}
+
+.sv-frozen-corner {
+  top: 0;
+  left: 0;
+  z-index: 9;
+}
+
+/* Frozen header bands: siblings of the scrolling header bands, drawn on top. */
+.sv-col-headers-frozen::after,
+.sv-row-headers-frozen::after {
+  content: '';
+  position: absolute;
+  z-index: 1;
+  background: var(--sv-color-frozen-line);
+  pointer-events: none;
+}
+
+.sv-col-headers-frozen::after {
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 2px;
+}
+
+.sv-row-headers-frozen::after {
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+}
+
 .sv-highlight-area {
   position: absolute;
   pointer-events: none;
