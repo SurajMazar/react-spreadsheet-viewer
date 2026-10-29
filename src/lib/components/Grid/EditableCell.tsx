@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback, type CSSProperties, type KeyboardEvent } from 'react';
 import type { CellValue, ValidationRule } from '../../types';
 import { validateCellValue } from '../../validation/validator';
+import DropdownEditor from './DropdownEditor';
 
 export interface EditableCellProps {
   row: number;
@@ -15,21 +16,17 @@ export interface EditableCellProps {
 
 /**
  * An input overlay that appears when a cell is double-clicked in edit mode.
- * Supports data validation (list type renders <select>, others show error states).
+ * Supports data validation (a list type opens the in-cell dropdown, others show error states).
  */
 export default function EditableCell({ row, col, value, style, validation, tabNavigation = true, onCommit, onCancel }: EditableCellProps) {
   const [localValue, setLocalValue] = useState(String(value ?? ''));
   const [validationError, setValidationError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const selectRef = useRef<HTMLSelectElement>(null);
 
   useEffect(() => {
-    if (validation?.type === 'list') {
-      selectRef.current?.focus();
-    } else {
-      inputRef.current?.focus();
-      inputRef.current?.select();
-    }
+    if (validation?.type === 'list') return;
+    inputRef.current?.focus();
+    inputRef.current?.select();
   }, [validation]);
 
   const tryCommit = useCallback(
@@ -48,7 +45,7 @@ export default function EditableCell({ row, col, value, style, validation, tabNa
   );
 
   const handleKeyDown = useCallback(
-    (e: KeyboardEvent<HTMLInputElement | HTMLSelectElement>) => {
+    (e: KeyboardEvent<HTMLInputElement>) => {
       if (e.key === 'Enter') {
         e.preventDefault();
         tryCommit(localValue);
@@ -68,33 +65,18 @@ export default function EditableCell({ row, col, value, style, validation, tabNa
     tryCommit(localValue);
   }, [localValue, tryCommit]);
 
-  // List validation: render a <select> dropdown
+  // List validation: the in-cell dropdown
   if (validation?.type === 'list') {
     return (
-      <div
-        className="sv-editable-cell"
-        style={{ ...style, zIndex: 50 }}
-      >
-        <select
-          ref={selectRef}
-          className="sv-editable-cell-input"
-          value={localValue}
-          onChange={(e) => {
-            setLocalValue(e.target.value);
-            setValidationError(null);
-            onCommit(row, col, e.target.value);
-          }}
-          onKeyDown={handleKeyDown}
-          onBlur={handleBlur}
-        >
-          <option value="">-- select --</option>
-          {(validation.listItems || []).map((item) => (
-            <option key={item} value={item}>
-              {item}
-            </option>
-          ))}
-        </select>
-      </div>
+      <DropdownEditor
+        row={row}
+        col={col}
+        value={String(value ?? '')}
+        items={validation.listItems || []}
+        style={style}
+        onCommit={onCommit}
+        onCancel={onCancel}
+      />
     );
   }
 

@@ -940,6 +940,115 @@
   position: absolute;
 }
 
+/* In-cell dropdown for list-validated cells: a button on the selected cell,
+   and an editor showing the cell with its list of allowed values below. */
+.sv-cell-dropdown-btn {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  bottom: 1px;
+  width: calc(18px * var(--sv-zoom));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  border-left: 1px solid var(--sv-color-border);
+  background: var(--sv-color-bg);
+  color: var(--sv-color-text-secondary);
+  cursor: pointer;
+  z-index: 1;
+}
+
+.sv-cell-dropdown-btn:hover {
+  background: var(--sv-color-hover);
+  color: var(--sv-color-text);
+}
+
+.sv-cell-dropdown-btn svg,
+.sv-dropdown-arrow svg {
+  width: calc(10px * var(--sv-zoom));
+  height: calc(10px * var(--sv-zoom));
+}
+
+.sv-dropdown {
+  outline: none;
+}
+
+.sv-dropdown-value {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 100%;
+  border: 2px solid var(--sv-color-primary);
+  background: var(--sv-color-bg);
+  box-sizing: border-box;
+  font-size: calc(var(--sv-font-size-base) * var(--sv-zoom));
+  font-family: var(--sv-font-family);
+  color: var(--sv-color-text);
+}
+
+.sv-dropdown-value-text {
+  flex: 1;
+  min-width: 0;
+  padding: 0 calc(5px * var(--sv-zoom));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sv-dropdown-arrow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  align-self: stretch;
+  width: calc(18px * var(--sv-zoom));
+  border-left: 1px solid var(--sv-color-border);
+  color: var(--sv-color-text-secondary);
+}
+
+.sv-dropdown-list {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  min-width: max(100%, calc(130px * var(--sv-zoom)));
+  max-height: calc(260px * var(--sv-zoom));
+  margin: 2px 0 0;
+  padding: 4px 0;
+  overflow-y: auto;
+  list-style: none;
+  background: var(--sv-color-bg);
+  border: 1px solid var(--sv-color-border);
+  border-radius: var(--sv-radius-sm);
+  box-shadow: var(--sv-shadow-lg);
+  box-sizing: border-box;
+}
+
+.sv-dropdown-list-up {
+  top: auto;
+  bottom: 100%;
+  margin: 0 0 2px;
+}
+
+.sv-dropdown-item {
+  padding: 0 calc(12px * var(--sv-zoom));
+  line-height: calc(30px * var(--sv-zoom));
+  font-size: calc(var(--sv-font-size-base) * var(--sv-zoom));
+  font-family: var(--sv-font-family);
+  color: var(--sv-color-text);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.sv-dropdown-item-active {
+  background: var(--sv-color-hover);
+}
+
+.sv-dropdown-item-selected {
+  color: var(--sv-color-primary);
+  font-weight: 500;
+}
+
 .sv-editable-cell-input {
   width: 100%;
   height: 100%;

@@ -2,6 +2,7 @@ import React, { memo, type CSSProperties, type MouseEvent } from 'react';
 import { isCellInRanges, getCellBorderInRanges } from '../../utils/rangeParser';
 import { getSafeLinkHref } from '../../utils/hyperlinks';
 import { formatCellValue } from '../../utils/numberFormat';
+import { DropdownArrow } from './DropdownEditor';
 import type { CellRange, ActiveCell, CellValue, CellStyle, CellComment, CellHyperlink, ParsedGridLineConfig } from '../../types';
 
 export interface CellProps {
@@ -39,6 +40,12 @@ export interface CellProps {
   isSearchActive?: boolean;
   /** Grid line configs that cover this cell (pre-filtered by caller) */
   gridLineBorders?: ParsedGridLineConfig[];
+  /**
+   * Show the in-cell dropdown button (a list-validated cell that is selected
+   * and editable). Clicking it calls `onDropdownOpen`.
+   */
+  showDropdownButton?: boolean;
+  onDropdownOpen?: (row: number, col: number) => void;
 }
 
 /**
@@ -67,6 +74,8 @@ const Cell = memo(function Cell({
   isSearchMatch = false,
   isSearchActive = false,
   gridLineBorders,
+  showDropdownButton = false,
+  onDropdownOpen,
 }: CellProps) {
   const hasRange = ranges.length > 0;
   const isInRange = hasRange && isCellInRanges(rowIndex, columnIndex, ranges);
@@ -198,6 +207,23 @@ const Cell = memo(function Cell({
       onDoubleClick={() => onCellDoubleClick?.(rowIndex, columnIndex)}
       title={text}
     >
+      {showDropdownButton && (
+        <button
+          type="button"
+          className="sv-cell-dropdown-btn"
+          aria-label="Open list"
+          tabIndex={-1}
+          // Not a selection drag, and not a double-click into the editor.
+          onMouseDown={(e) => e.stopPropagation()}
+          onDoubleClick={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            onDropdownOpen?.(rowIndex, columnIndex);
+          }}
+        >
+          <DropdownArrow />
+        </button>
+      )}
       {comment && <div className="sv-comment-indicator" title={`${comment.author ? comment.author + ': ' : ''}${comment.text}`} />}
       <span className={hasWrap ? 'sv-cell-text sv-cell-text-wrap' : 'sv-cell-text'}>
         {hyperlink && linkHref ? (
