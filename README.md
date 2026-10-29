@@ -951,7 +951,7 @@ const data: WorkbookInput = {
 - `meta` is never read by the viewer — it carries whatever the host needs (a source position, an id, a confidence flag) through edits and back out of `getCellRows()`.
 - `colSpan` / `rowSpan` on a cell merge it with its neighbours.
 - `frozenRows` / `frozenCols` keep the top rows and left columns (and their headers) in view while the rest scrolls, at any zoom. Clicking a frozen cell does not scroll the grid.
-- A cell with a list `validation` edits as a dropdown that starts on the value the cell shows; picking an option replaces a formula in that cell with the picked value.
+- A cell with a list `validation` shows a ▼ button when it is selected in edit mode. The button, a double-click or Enter opens the list of allowed values under the cell (it opens upwards near the bottom of the grid). Arrow keys, Home/End and typing a letter move through it; Enter or a click picks, Escape or clicking away cancels. The list starts on the value the cell shows; picking replaces a formula in that cell with the picked value.
 - `onCellChange` reports the cell the user changed (typing, paste, undo/redo). Updates made through the ref are silent.
 - Keep `data` and `customFunctions` stable between renders (`useMemo`): a new `data` object reloads the workbook, and new function identities recalculate.
 

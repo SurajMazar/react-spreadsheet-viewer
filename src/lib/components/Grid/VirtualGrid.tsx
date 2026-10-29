@@ -409,6 +409,15 @@ export default function VirtualGrid({
     [canEdit]
   );
 
+  // The in-cell dropdown button opens the list editor straight away.
+  const onDropdownOpen = useCallback(
+    (row: number, col: number) => {
+      if (!canEdit) return;
+      setEditingCell({ row, col });
+    },
+    [canEdit]
+  );
+
   const onEditCommit = useCallback(
     (row: number, col: number, value: string) => {
       if (activeSheet) {
@@ -943,6 +952,14 @@ export default function VirtualGrid({
         isSearchMatch={isSearchMatch}
         isSearchActive={isSearchActive}
         gridLineBorders={cellGridLines && cellGridLines.length > 0 ? cellGridLines : undefined}
+        showDropdownButton={
+          canEdit &&
+          !!activeCell &&
+          activeCell.row === row &&
+          activeCell.col === col &&
+          sheetData.validations?.[`${row},${col}`]?.type === 'list'
+        }
+        onDropdownOpen={onDropdownOpen}
         style={{
           position: 'absolute',
           top: vr.start,
