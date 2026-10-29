@@ -64,4 +64,4 @@ Never reach for `transform: scale()` on the scroll container — it would desync
 
 ## Known limitations (see AGENTS.md §15)
 
-Main-thread parsing (no Web Worker), light theme only, no freeze panes, no built-in sort/filter, limited image extraction, hidden Excel columns render at default width, row heights from the file are not preserved.
+Main-thread parsing (no Web Worker), light theme only, freeze panes only via `data` (not read from `.xlsx`), no built-in sort/filter, limited image extraction, hidden columns in `.xlsx` files render at default width (`data.hiddenCols` is honoured), row heights from the file are not preserved, `.xlsx` formulas show cached values (only `data`/typed formulas are evaluated), number formats limited to what Docsumo uses.

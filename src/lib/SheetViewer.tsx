@@ -5,6 +5,7 @@ import { resolveSheetLimits } from './utils/sheetBounds';
 import { useFileParser } from './hooks/useFileParser';
 import { useKeyboardLockdown } from './hooks/useKeyboardLockdown';
 import { parseRangeExpression } from './utils/rangeParser';
+import { buildWorkbook, sheetToCellRows } from './utils/workbookInput';
 import { DEFAULT_ZOOM } from './utils/zoom';
 import { computeAutoFitWidth, createCanvasTextMeasurer, resolveAutoFitFont } from './utils/autoFit';
 import { ALL_KEYBOARD_INTERACTIONS, isSameKeyboardConfig, resolveKeyboardConfig } from './utils/keyboard';
@@ -16,7 +17,7 @@ import StatusBar from './components/StatusBar';
 import ChartPanel from './components/ChartPanel';
 import SearchBar from './components/SearchBar';
 import SheetTooLarge from './components/SheetTooLarge';
-import type { SheetViewerProps, SheetViewerHandle, SheetViewerMode, SheetViewerLoadingState, CellValue, CellComment, ParsedGridLineConfig } from './types';
+import type { SheetViewerProps, SheetViewerHandle, SheetViewerMode, SheetViewerLoadingState, CellValue, CellComment, CellStyle, ParsedGridLineConfig, SheetCellInput, ViewerState } from './types';
 import './styles/sheet-viewer.css';
 
 /**
@@ -45,6 +46,8 @@ interface SheetViewerInnerProps extends SheetViewerProps {
 
 function SheetViewerInner({
   source,
+  data,
+  customFunctions,
   mode = 'view',
   activeSheet: controlledSheet,
   highlight,
@@ -87,8 +90,9 @@ function SheetViewerInner({
   forwardedRef,
 }: SheetViewerInnerProps) {
   const storeApi = useViewerStoreApi();
+  // `data` wins over `source`: with data set, the source is never fetched.
   const { buffer, fileName, isLoading: sourceLoading, error: sourceError, cause: sourceCause } = useSourceLoader(
-    source,
+    data ? undefined : source,
     resolveSheetLimits(limits).maxBytes,
   );
 
@@ -210,6 +214,24 @@ function SheetViewerInner({
     if (highlightBorderColor) vars['--sv-highlight-border-color'] = highlightBorderColor;
     return vars as CSSProperties;
   }, [theme, searchMatchColor, searchActiveColor, highlightColor, highlightBorderColor]);
+
+  /**
+   * Resolve a single-cell reference ("B4") on a sheet (default: the active
+   * one). Unlike highlights, cells past the current used range are allowed —
+   * writing there grows the sheet.
+   */
+  const resolveCell = useCallback(
+    (cellRef: string, sheetName?: string): { state: ViewerState; key: string; row: number; col: number } | null => {
+      const state = storeApi.getState();
+      const key = sheetName ?? state.activeSheet ?? '';
+      const sheet = state.sheets[key];
+      if (!sheet || !key) return null;
+      const ranges = parseRangeExpression(cellRef, sheet.rows, sheet.cols);
+      if (ranges.length === 0) return null;
+      return { state, key, row: ranges[0].startRow, col: ranges[0].startCol };
+    },
+    [storeApi],
+  );
 
   // The imperative API, built once and shared: `ref` exposes it to the consumer
   // and registered tools receive the very same object in their context, so a
@@ -354,7 +376,43 @@ function SheetViewerInner({
       }
       return result;
     },
-  }), [storeApi, clearHighlightInStore, withOptionalSilentSelection]);
+    setCellValue: (cellRef: string, value: CellValue, sheetName?: string) => {
+      const target = resolveCell(cellRef, sheetName);
+      if (target) target.state.setCellValue(target.key, target.row, target.col, value, { silent: true });
+    },
+    setCellStyle: (rangeRef: string, style: CellStyle | null, sheetName?: string) => {
+      const s = storeApi.getState();
+      const key = sheetName ?? s.activeSheet ?? '';
+      const sheet = s.sheets[key];
+      if (!sheet || !key) return;
+      for (const r of parseRangeExpression(rangeRef, sheet.rows, sheet.cols)) {
+        for (let row = r.startRow; row <= r.endRow; row++) {
+          for (let col = r.startCol; col <= r.endCol; col++) {
+            storeApi.getState().setCellStyle(key, row, col, style);
+          }
+        }
+      }
+    },
+    getCellMeta: (cellRef: string, sheetName?: string) => {
+      const target = resolveCell(cellRef, sheetName);
+      if (!target) return null;
+      return target.state.sheets[target.key].meta?.[`${target.row},${target.col}`] ?? null;
+    },
+    updateCell: (cellRef: string, update: SheetCellInput, sheetName?: string) => {
+      const target = resolveCell(cellRef, sheetName);
+      if (target) target.state.updateCell(target.key, target.row, target.col, update, { silent: true });
+    },
+    getCellRows: (sheetName?: string) => {
+      const s = storeApi.getState();
+      const sheet = s.sheets[sheetName ?? s.activeSheet ?? ''];
+      return sheet ? sheetToCellRows(sheet) : [];
+    },
+    recalculate: (sheetName?: string) => {
+      const s = storeApi.getState();
+      const key = sheetName ?? s.activeSheet;
+      if (key) s.recalculateSheet(key);
+    },
+  }), [storeApi, clearHighlightInStore, withOptionalSilentSelection, resolveCell]);
 
   useImperativeHandle(forwardedRef, () => viewerApi, [viewerApi]);
 
@@ -395,6 +453,27 @@ function SheetViewerInner({
     return unsub;
   }, [onZoomChange, storeApi]);
 
+  // Custom formula functions. Declared before the `data` effect so a workbook
+  // given together with its functions is evaluated with them on first load.
+  useEffect(() => {
+    storeApi.getState().setCustomFunctions(customFunctions);
+  }, [customFunctions, storeApi]);
+
+  // Load the `data` prop. A new object is a new workbook: selections and the
+  // undo history start over.
+  const hadDataRef = useReactRef(false);
+  useEffect(() => {
+    const s = storeApi.getState();
+    if (!data) {
+      if (hadDataRef.current) s.reset();
+      hadDataRef.current = false;
+      return;
+    }
+    hadDataRef.current = true;
+    s.setFileData(buildWorkbook(data));
+    storeApi.setState({ undoStack: [], redoStack: [] });
+  }, [data, storeApi]);
+
   // Parse buffer when source is loaded
   useEffect(() => {
     if (buffer && fileName) {
@@ -432,21 +511,16 @@ function SheetViewerInner({
     }
   }, [highlight, internalActiveSheet, sheetData, setSelectionRanges, storeApi]);
 
-  // Listen for cell changes in edit mode and forward to callback
+  // Report user edits. `lastCellChange` names the cell that changed (typing,
+  // paste, undo/redo); updates made through the handle are silent.
   useEffect(() => {
     if (!onCellChange) return;
     const unsub = storeApi.subscribe((state, prevState) => {
-      if (state.sheets !== prevState.sheets && state.activeSheet) {
-        const sheet = state.sheets[state.activeSheet];
-        const prevSheet = prevState.sheets[state.activeSheet];
-        if (sheet && prevSheet && sheet.data !== prevSheet.data) {
-          const cell = state.activeCell;
-          if (cell) {
-            const val: CellValue = sheet.data[cell.row]?.[cell.col];
-            onCellChange(state.activeSheet!, cell.row, cell.col, val);
-          }
-        }
-      }
+      const change = state.lastCellChange;
+      if (!change || change === prevState.lastCellChange) return;
+      const sheet = state.sheets[change.sheetName];
+      if (!sheet) return;
+      onCellChange(change.sheetName, change.row, change.col, sheet.data[change.row]?.[change.col] ?? null);
     });
     return unsub;
   }, [onCellChange, storeApi]);
@@ -530,7 +604,7 @@ function SheetViewerInner({
         </div>
       )}
 
-      {!source && !isLoadingAny && !hasData && (
+      {!source && !data && !isLoadingAny && !hasData && (
         <div className="sv-empty-overlay">
           <p className="sv-empty-text">No source provided</p>
         </div>

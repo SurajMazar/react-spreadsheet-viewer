@@ -43,7 +43,8 @@ A high-performance React component for viewing and editing Excel and CSV files w
 - **Hyperlinks** — workbook links render as clickable links; only `http`, `https`, `mailto` and `tel` targets are allowed, anything else (e.g. `javascript:`) stays plain text
 - **Conditional formatting** — rule-based cell styling (value comparisons, color scales, data bars)
 - **Data validation** — input validation with dropdown lists, number/date ranges, and error UI
-- **Formula engine** — parse and evaluate Excel-style formulas (24 built-in functions: SUM, IF, VLOOKUP, etc.)
+- **Formula engine** — parse and evaluate Excel-style formulas (24 built-in functions: SUM, IF, VLOOKUP, etc.) plus your own functions via `customFunctions`
+- **Workbook from data** — pass sheets as JSON (`data` prop) with per-cell values, formulas, number formats, styles, borders, dropdowns and metadata; read them back with `getCellRows()` to save
 - **Imperative API** — access sheet data, navigate sheets, resize columns, manage comments, undo/redo, and more via ref
 - **Selection callback with DOM info** — `onSelectionChange` provides the anchor cell's `HTMLElement` and `DOMRect`
 - **Highlightable** — disable all cell/range highlight visuals with `highlightable={false}`
@@ -116,6 +117,8 @@ The `source` prop accepts multiple formats:
 | Prop | Type | Default | Description |
 |---|---|---|---|
 | `source` | `string \| File \| ArrayBuffer \| ArrayBufferView` | — | Data source to load |
+| `data` | `WorkbookInput` | — | The workbook as data instead of a file. Takes precedence over `source`; a new object reloads (and clears undo). See [Workbook from data](#workbook-from-data) |
+| `customFunctions` | `Record<string, SheetViewerFormulaFunction>` | — | Extra formula functions (case-insensitive names). Changing the set recalculates every formula |
 | `mode` | `'view' \| 'edit'` | `'view'` | View-only or editable mode |
 | `activeSheet` | `string` | — | Controlled active sheet name |
 | `highlight` | `string` | — | Excel-style range to highlight (e.g. `"A1:D10"`) |
@@ -248,6 +251,12 @@ function App() {
 | `redo()` | `void` | Redo the last undone edit |
 | `canUndo()` | `boolean` | Whether undo is available |
 | `canRedo()` | `boolean` | Whether redo is available |
+| `setCellValue(cellRef, value, name?)` | `void` | Set a value; a string starting with `=` sets a formula. Works in any mode, no undo entry, no `onCellChange` |
+| `setCellStyle(rangeRef, style \| null, name?)` | `void` | Merge a style into every cell of a range (`null` clears) |
+| `updateCell(cellRef, update, name?)` | `void` | Set value/formula, format, style (merged), metadata, validation and comment at once |
+| `getCellMeta(cellRef, name?)` | `CellMeta \| null` | The metadata attached to a cell |
+| `getCellRows(name?)` | `SheetCellInput[][]` | The whole sheet as rows of cells, in the shape `data` accepts — use it to save |
+| `recalculate(name?)` | `void` | Re-evaluate formulas, e.g. after data a custom function reads has arrived |
 
 ---
 
@@ -903,6 +912,53 @@ const validations: Record<string, ValidationRule> = {
 
 ---
 
+## Workbook from data
+
+Instead of a file, pass the workbook as JSON. Each row entry is a plain value or a cell object:
+
+```tsx
+const data: WorkbookInput = {
+  fileName: 'pnl.xlsx',
+  sheets: [
+    {
+      name: 'Cleaned',
+      readOnly: false,          // true = protected: no editing even in mode="edit"
+      hiddenCols: [5],          // hidden columns take no width
+      frozenRows: 2,            // freeze panes: top rows and left columns stay in view
+      frozenCols: 1,
+      colWidths: [220, 120],
+      rows: [
+        [{ value: 'Label', style: { bold: true } }, 'FY24', 'COA'],
+        [
+          { value: 'Revenue', meta: { position: ['A', 27, 'H', 27], page: 1 } },
+          { value: 1234.5, format: '#,##0.00', style: { borders: { bottom: '2px solid #FF0000' } } },
+          { formula: '=LOOKUP(A2,"label","category")', validation: { type: 'list', listItems: ['Income', 'Expense'] } },
+        ],
+      ],
+    },
+  ],
+};
+
+<SheetViewer
+  data={data}
+  mode="edit"
+  customFunctions={{ LOOKUP: (value, key, dest) => coaTable[String(value)]?.[String(dest)] ?? '' }}
+/>;
+```
+
+- `formula` results are written into the cell value, so search, copy and `getCellRangeData` see what the cell shows. A formula that reaches itself shows `#REF!`; a custom function that throws shows `#VALUE!`.
+- `format` supports `0`, `0.00` (any decimals), `#,##0`, `#,##0.00`, `0%`, `0.00%`, `@` and Excel-serial dates (`dd/mm/yyyy`, `mm/dd/yyyy`, `yyyy-mm-dd`, `d-mmm-yy` …). Other formats show the plain value.
+- `meta` is never read by the viewer — it carries whatever the host needs (a source position, an id, a confidence flag) through edits and back out of `getCellRows()`.
+- `colSpan` / `rowSpan` on a cell merge it with its neighbours.
+- `frozenRows` / `frozenCols` keep the top rows and left columns (and their headers) in view while the rest scrolls, at any zoom. Clicking a frozen cell does not scroll the grid.
+- A cell with a list `validation` edits as a dropdown that starts on the value the cell shows; picking an option replaces a formula in that cell with the picked value.
+- `onCellChange` reports the cell the user changed (typing, paste, undo/redo). Updates made through the ref are silent.
+- Keep `data` and `customFunctions` stable between renders (`useMemo`): a new `data` object reloads the workbook, and new function identities recalculate.
+
+`buildSheetFromRows`, `buildWorkbook`, `sheetToCellRows`, `formatCellValue` and `recalculateSheet` are exported for use outside the component.
+
+---
+
 ## Formula Engine
 
 Parse and evaluate Excel-style formulas. 24 built-in functions:
@@ -913,6 +969,8 @@ Parse and evaluate Excel-style formulas. 24 built-in functions:
 | Logical | `IF`, `AND`, `OR`, `NOT` |
 | Text | `CONCATENATE`, `LEFT`, `RIGHT`, `MID`, `LEN`, `UPPER`, `LOWER`, `TRIM` |
 | Lookup | `VLOOKUP`, `HLOOKUP`, `INDEX`, `MATCH` |
+
+Formulas are evaluated for sheets given through `data`, and for cells a user types `=…` into in edit mode (the formula bar then shows the formula, the cell its result). Formulas in loaded `.xlsx` files are not re-evaluated: those cells show the value the file cached. Add your own functions with `customFunctions`; a custom function with a built-in's name replaces it.
 
 ---
 

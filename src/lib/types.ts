@@ -44,6 +44,37 @@ export interface SheetData {
   /** Sparse map of data validation rules keyed by "row,col" */
   validations?: Record<string, ValidationRule>;
   /**
+   * Sparse map of formulas keyed by "row,col" (e.g. `"=SUM(A1:A3)"`). The
+   * viewer evaluates them with the built-in functions plus any
+   * `customFunctions` and writes the results into `data`, so `data` always
+   * holds what the cell displays.
+   */
+  formulas?: Record<string, string>;
+  /**
+   * Sparse map of number formats keyed by "row,col" — `"0.00"`, `"#,##0.00"`,
+   * `"0%"`, `"@"` (text), `"dd/mm/yyyy"` … Numeric values are displayed through
+   * the format; `data` keeps the raw value. See `formatCellValue`.
+   */
+  formats?: Record<string, string>;
+  /**
+   * Sparse map of arbitrary per-cell metadata keyed by "row,col" — anything the
+   * host app needs to carry with a cell (a source position, an id, a
+   * confidence flag). The viewer never reads it; it is kept through edits and
+   * returned by `getCellMeta` and `getCellRows`.
+   */
+  meta?: Record<string, CellMeta>;
+  /** Column indexes (0-based) that are hidden. Hidden columns take no width. */
+  hiddenCols?: number[];
+  /** Number of top rows that stay in view while the sheet scrolls (frozen panes). */
+  frozenRows?: number;
+  /** Number of left columns that stay in view while the sheet scrolls (frozen panes). */
+  frozenCols?: number;
+  /**
+   * When true the sheet cannot be edited even in `mode="edit"` — the
+   * equivalent of a protected sheet.
+   */
+  readOnly?: boolean;
+  /**
    * Set when the sheet's used range is over the viewer's `limits`. The sheet
    * was not parsed — `data` is empty and `rows`/`cols` are 0 — and the grid
    * shows a "too large to preview" message in its place.
@@ -60,7 +91,85 @@ export interface CellStyle {
   fontSize?: number;
   textAlign?: 'left' | 'center' | 'right';
   wrapText?: boolean;
+  /**
+   * Cell borders as CSS border values, e.g. `{ top: '2px solid #FF0000' }`.
+   * Drawn under the selection outline, so a selected cell still shows as
+   * selected.
+   */
+  borders?: CellBorders;
 }
+
+/** Per-side cell borders as CSS border values (`"1px solid #000"`). */
+export interface CellBorders {
+  top?: string;
+  right?: string;
+  bottom?: string;
+  left?: string;
+}
+
+/** Arbitrary metadata the host app attaches to a cell. */
+export type CellMeta = Record<string, unknown>;
+
+/**
+ * One cell in the row-and-cell shape used to build a sheet from data
+ * (`buildSheetFromRows`) and returned when reading a sheet back
+ * (`getCellRows`). Close to the cell model of grid libraries such as
+ * Syncfusion, so an existing JSON payload maps over directly.
+ */
+export interface SheetCellInput {
+  value?: CellValue;
+  /** A formula such as `"=SUM(A1:A3)"`. Its result replaces `value`. */
+  formula?: string;
+  /** Number format, e.g. `"0.00"`. */
+  format?: string;
+  style?: CellStyle;
+  meta?: CellMeta;
+  validation?: ValidationRule;
+  comment?: CellComment;
+  /** Merge this cell with the cells to its right (`colSpan`) and below (`rowSpan`). */
+  colSpan?: number;
+  rowSpan?: number;
+}
+
+/** One sheet given as data rather than read from a file. */
+export interface SheetInput {
+  /** Sheet (tab) name. Must be unique in the workbook. */
+  name: string;
+  /**
+   * The sheet's cells, row by row. Each entry is either a plain value or a
+   * `SheetCellInput`; `null`/`undefined` entries are empty cells.
+   */
+  rows: (SheetCellInput | CellValue)[][];
+  /** Column widths in pixels (unzoomed). */
+  colWidths?: number[];
+  /** Row heights in pixels (unzoomed); sparse. */
+  rowHeights?: number[];
+  hiddenCols?: number[];
+  /** Rows kept in view at the top while scrolling (Excel's Freeze Panes). */
+  frozenRows?: number;
+  /** Columns kept in view at the left while scrolling. */
+  frozenCols?: number;
+  readOnly?: boolean;
+  /** Extra merges, in addition to any `colSpan`/`rowSpan` on cells. */
+  merges?: MergeCell[];
+}
+
+/** A workbook given as data — the `data` prop. */
+export interface WorkbookInput {
+  /** Shown in the toolbar and used for downloads. Defaults to `"workbook.xlsx"`. */
+  fileName?: string;
+  sheets: SheetInput[];
+}
+
+/**
+ * A custom formula function. Receives its arguments already evaluated: cell
+ * references arrive as their values, ranges as 2-D arrays, string literals as
+ * plain strings (without quotes).
+ */
+export type SheetViewerFormulaFunction = (...args: FormulaArgument[]) => FormulaArgument;
+
+/** A value a formula function receives or returns. */
+export type FormulaArgument = number | string | boolean | null | FormulaArgument[];
 
 /** A cell comment */
 export interface CellComment {
@@ -425,6 +534,19 @@ export type SheetViewerErrorHandler = (error: Error) => void;
 export interface SheetViewerProps {
   /** URL, File, ArrayBuffer, or TypedArray to load */
   source?: SheetViewerSource;
+  /**
+   * The workbook as data instead of a file: sheets of cells with values,
+   * formulas, formats, styles, validations and metadata. When set it takes
+   * precedence over `source`. A new object reloads the workbook (and clears
+   * the undo history), so keep it stable between renders.
+   */
+  data?: WorkbookInput;
+  /**
+   * Extra formula functions, keyed by name (case-insensitive), available to
+   * every formula next to the built-ins. A custom function with the same name
+   * as a built-in replaces it. Changing the set recalculates all formulas.
+   */
+  customFunctions?: Record<string, SheetViewerFormulaFunction>;
   /** View-only or edit mode (default: "view") */
   mode?: SheetViewerMode;
   /** Controlled active sheet name */
@@ -523,6 +645,11 @@ export interface SheetViewerProps {
   /** Callback when the user selects a sheet tab. Receives the selected sheet name. */
   onSheetSelect?: (sheetName: string) => void;
   /** Callback when a cell is edited */
+  /**
+   * Called when the user changes a cell (typing, paste, undo/redo of an edit).
+   * Reports the cell that changed. Not called for changes made through the
+   * imperative handle.
+   */
   onCellChange?: (sheet: string, row: number, col: number, value: CellValue) => void;
   /** Callback when selection changes, with the DOM element and bounding rect of the anchor cell */
   onSelectionChange?: (ranges: CellRange[], cellInfo?: { element: HTMLElement; rect: DOMRect }) => void;
@@ -644,6 +771,32 @@ export interface SheetViewerHandle {
   canUndo(): boolean;
   /** Returns true if there is at least one redoable action. */
   canRedo(): boolean;
+  /**
+   * Set a cell's value. A string starting with `=` sets a formula instead.
+   * Works in any mode, is not recorded for undo and does not fire
+   * `onCellChange`. Formulas that depend on the cell are recalculated.
+   */
+  setCellValue(cellRef: string, value: CellValue, sheetName?: string): void;
+  /**
+   * Merge a style into every cell of a range (`"A1"`, `"A1:C3"`). Pass `null`
+   * to clear the cells' styles. Not recorded for undo.
+   */
+  setCellStyle(rangeRef: string, style: CellStyle | null, sheetName?: string): void;
+  /** Read a cell's metadata, or null when it has none. */
+  getCellMeta(cellRef: string, sheetName?: string): CellMeta | null;
+  /**
+   * Apply several properties to one cell at once: value or formula, format,
+   * style (merged), metadata (replaced), validation and comment.
+   */
+  updateCell(cellRef: string, update: SheetCellInput, sheetName?: string): void;
+  /**
+   * The whole sheet as rows of cells — value, formula, format, style, meta,
+   * validation and comment — the shape `buildSheetFromRows` accepts. Use it to
+   * save the sheet after edits.
+   */
+  getCellRows(sheetName?: string): SheetCellInput[][];
+  /** Re-evaluate every formula in the sheet (or the active sheet). */
+  recalculate(sheetName?: string): void;
 }
 
 // ============================================================
@@ -730,6 +883,16 @@ export interface ViewerState {
   undoStack: UndoEntry[];
   redoStack: UndoEntry[];
 
+  // Formulas
+  /** Custom formula functions from the `customFunctions` prop, upper-cased names. */
+  customFunctions: Record<string, SheetViewerFormulaFunction>;
+  /**
+   * The last cell the user changed, set by edits (not by silent updates). The
+   * `onCellChange` callback follows this, so it reports the right cell even
+   * for paste and undo.
+   */
+  lastCellChange: { sheetName: string; row: number; col: number; seq: number } | null;
+
   // Actions
   setParseProgress: (progress: number, status?: string) => void;
   startParsing: () => void;
@@ -746,7 +909,17 @@ export interface ViewerState {
   setSelectionRanges: (sheetName: string, ranges: CellRange[], rangeInput?: string) => void;
   setRangeInput: (sheetName: string, rangeInput: string) => void;
   setScrollPosition: (sheetName: string, scrollPos: { top: number; left: number }) => void;
-  setCellValue: (sheetName: string, row: number, col: number, value: CellValue) => void;
+  /**
+   * Set a cell's value. A string starting with `=` becomes the cell's formula.
+   * Not `silent` by default: the change is reported through `lastCellChange`.
+   */
+  setCellValue: (
+    sheetName: string,
+    row: number,
+    col: number,
+    value: CellValue,
+    options?: { silent?: boolean },
+  ) => void;
   toggleChartPanel: () => void;
   setChartType: (chartType: string) => void;
   setCopiedRange: (range: CellRange | null) => void;
@@ -758,6 +931,21 @@ export interface ViewerState {
   setRowHeight: (sheetName: string, rowIndex: number, height: number) => void;
   setCellComment: (sheetName: string, row: number, col: number, comment: CellComment | null) => void;
   setMode: (mode: SheetViewerMode) => void;
+  /** Replace the custom formula functions and recalculate every sheet. */
+  setCustomFunctions: (functions: Record<string, SheetViewerFormulaFunction> | undefined) => void;
+  /** Re-evaluate the formulas of one sheet. */
+  recalculateSheet: (sheetName: string) => void;
+  /**
+   * Apply an update to one cell. `silent` updates skip `lastCellChange` (so
+   * `onCellChange` does not fire); edits from the grid are not silent.
+   */
+  updateCell: (
+    sheetName: string,
+    row: number,
+    col: number,
+    update: SheetCellInput,
+    options?: { silent?: boolean },
+  ) => void;
   /** Set the zoom factor. Clamped to the store's min/max. */
   setZoom: (zoom: number) => void;
   /** Replace the zoom bounds and level list, re-clamping the current zoom. */

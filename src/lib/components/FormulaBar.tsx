@@ -108,6 +108,9 @@ export default function FormulaBar({
     if (!s.activeCell || !s.activeSheet) return '';
     const sheet = s.sheets[s.activeSheet];
     if (!sheet) return '';
+    // A formula cell shows its formula, as in Excel; the grid shows its result.
+    const formula = sheet.formulas?.[`${s.activeCell.row},${s.activeCell.col}`];
+    if (formula) return formula;
     const row = sheet.data[s.activeCell.row];
     if (!row) return '';
     return row[s.activeCell.col] ?? '';

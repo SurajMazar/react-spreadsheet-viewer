@@ -1,6 +1,6 @@
 import React, { useCallback, useRef, useEffect, useState, useMemo, type MouseEvent, type Ref, type MutableRefObject } from 'react';
-import { useVirtualizer } from '@tanstack/react-virtual';
-import { useViewerStore, EMPTY_SELECTION, EMPTY_RANGES } from '../../context/ViewerContext';
+import { useVirtualizer, defaultRangeExtractor, type Range, type VirtualItem } from '@tanstack/react-virtual';
+import { useViewerStore, EMPTY_SELECTION, EMPTY_RANGES, getCellInputValue } from '../../context/ViewerContext';
 import { colIndexToLetter, isCellInRanges, unionRanges } from '../../utils/rangeParser';
 import { getRangeBox, getScrollToReveal } from '../../utils/gridGeometry';
 import { scaleToZoom } from '../../utils/zoom';
@@ -16,6 +16,15 @@ import type { MergeCell, CellStyle, CellValueChange, CellStyleChange, ParsedGrid
 
 /** Base geometry, in unzoomed pixels. Every rendered size derives from these. */
 export const COL_WIDTH = 100;
+
+/** The virtualizer's visible range plus the first `pinned` indexes, sorted. */
+export function withPinned(range: Range, pinned: number): number[] {
+  const visible = defaultRangeExtractor(range);
+  if (pinned <= 0) return visible;
+  const indexes = new Set<number>(visible);
+  for (let i = 0; i < Math.min(pinned, range.count); i++) indexes.add(i);
+  return Array.from(indexes).sort((a, b) => a - b);
+}
 export const ROW_HEIGHT = 26;
 export const ROW_HEADER_WIDTH = 50;
 export const COL_HEADER_HEIGHT = 28;
@@ -73,6 +82,8 @@ export default function VirtualGrid({
   const undo = useViewerStore((s) => s.undo);
   const redo = useViewerStore((s) => s.redo);
   const mode = useViewerStore((s) => s.mode);
+  // A read-only (protected) sheet stays view-only whatever the mode.
+  const canEdit = mode === 'edit' && !sheetData?.readOnly;
   const isProgrammaticHighlight = useViewerStore((s) => s.isProgrammaticHighlight);
   const setProgrammaticHighlight = useViewerStore((s) => s.setProgrammaticHighlight);
   const zoom = useViewerStore((s) => s.zoom);
@@ -172,6 +183,12 @@ export default function VirtualGrid({
   const dataRows = sheetData?.rows || 0;
   const colWidths = sheetData?.colWidths;
   const rowHeights = sheetData?.rowHeights;
+  const hiddenColsList = sheetData?.hiddenCols;
+  const hiddenCols = useMemo(() => new Set(hiddenColsList ?? []), [hiddenColsList]);
+  // Frozen panes: the first `frozenRows` rows and `frozenCols` columns stay in
+  // view while the rest scrolls, as in Excel's Freeze Panes.
+  const frozenRows = Math.max(0, Math.floor(sheetData?.frozenRows ?? 0));
+  const frozenCols = Math.max(0, Math.floor(sheetData?.frozenCols ?? 0));
 
   // Header bands scale with zoom too, so the whole sheet reads as one document
   // rather than full-size chrome around a shrunken grid.
@@ -187,8 +204,12 @@ export default function VirtualGrid({
 
   // Base (unzoomed) sizes: what the store holds and what resize/auto-fit write.
   const getBaseColWidth = useCallback(
-    (index: number) => (colWidths && index < colWidths.length && colWidths[index]) ? colWidths[index] : COL_WIDTH,
-    [colWidths]
+    (index: number) => {
+      // Hidden columns collapse to nothing, as in Excel.
+      if (hiddenCols.has(index)) return 0;
+      return (colWidths && index < colWidths.length && colWidths[index]) ? colWidths[index] : COL_WIDTH;
+    },
+    [colWidths, hiddenCols]
   );
 
   const getBaseRowHeight = useCallback(
@@ -208,11 +229,32 @@ export default function VirtualGrid({
     [getBaseRowHeight, zoom]
   );
 
+  // Frozen indexes are always part of the virtual range, wherever the grid is
+  // scrolled, so their cells and headers are always rendered.
+  const frozenRowCount = Math.min(frozenRows, effectiveRows);
+  const frozenColCount = Math.min(frozenCols, effectiveCols);
+  const rowRangeExtractor = useCallback(
+    (range: Range) => withPinned(range, frozenRowCount),
+    [frozenRowCount]
+  );
+  const colRangeExtractor = useCallback(
+    (range: Range) => withPinned(range, frozenColCount),
+    [frozenColCount]
+  );
+
+  // The frozen band's size, so scrollToIndex treats cells under it as hidden.
+  let frozenHeight = 0;
+  for (let i = 0; i < frozenRowCount; i++) frozenHeight += getRowHeight(i);
+  let frozenWidth = 0;
+  for (let i = 0; i < frozenColCount; i++) frozenWidth += getColWidth(i);
+
   const rowVirtualizer = useVirtualizer({
     count: effectiveRows,
     getScrollElement: () => scrollRef.current,
     estimateSize: getRowHeight,
     overscan: 8,
+    rangeExtractor: rowRangeExtractor,
+    scrollPaddingStart: frozenHeight,
   });
 
   const colVirtualizer = useVirtualizer({
@@ -221,6 +263,8 @@ export default function VirtualGrid({
     estimateSize: getColWidth,
     horizontal: true,
     overscan: 4,
+    rangeExtractor: colRangeExtractor,
+    scrollPaddingStart: frozenWidth,
   });
 
   // Track virtualizer references for scrollToIndex
@@ -234,7 +278,7 @@ export default function VirtualGrid({
   // offsets and the cells drift away from the headers.
   useEffect(() => {
     colVirtualizer.measure();
-  }, [colWidths, zoom, colVirtualizer]);
+  }, [colWidths, hiddenCols, zoom, colVirtualizer]);
 
   useEffect(() => {
     rowVirtualizer.measure();
@@ -247,7 +291,7 @@ export default function VirtualGrid({
   // performed while scrolled cannot leave the headers parked at the origin.
   useEffect(() => {
     syncHeaders();
-  }, [syncHeaders, zoom, colWidths, rowHeights, effectiveCols, effectiveRows]);
+  }, [syncHeaders, zoom, colWidths, rowHeights, hiddenCols, effectiveCols, effectiveRows]);
 
   // Auto-scroll to selection only when the full range is not visible in the viewport
   useEffect(() => {
@@ -276,24 +320,32 @@ export default function VirtualGrid({
       const colFullyVisible = rangeColStart && rangeColEnd
         && rangeColStart.start >= scrollLeft && rangeColEnd.end <= viewportRight;
 
-      if (!rowFullyVisible || !colFullyVisible) {
-        if (!rowFullyVisible) {
+      // A range inside the frozen band is always on screen.
+      const inFrozenRows = first.endRow < frozenRowCount;
+      const inFrozenCols = first.endCol < frozenColCount;
+      if ((!rowFullyVisible && !inFrozenRows) || (!colFullyVisible && !inFrozenCols)) {
+        if (!rowFullyVisible && !inFrozenRows) {
           rowVirtualizerRef.current.scrollToIndex(first.startRow, { align: 'center' });
         }
-        if (!colFullyVisible) {
+        if (!colFullyVisible && !inFrozenCols) {
           colVirtualizerRef.current.scrollToIndex(first.startCol, { align: 'center' });
         }
       }
     }
-  }, [ranges]);
+  }, [ranges, frozenRowCount, frozenColCount]);
 
-  // Auto-scroll to active cell
+  // Auto-scroll to active cell. A frozen cell is always visible: scrolling to
+  // it would jump the grid back to the top or left edge.
   useEffect(() => {
     if (activeCell) {
-      rowVirtualizerRef.current.scrollToIndex(activeCell.row, { align: 'auto' });
-      colVirtualizerRef.current.scrollToIndex(activeCell.col, { align: 'auto' });
+      if (activeCell.row >= frozenRowCount) {
+        rowVirtualizerRef.current.scrollToIndex(activeCell.row, { align: 'auto' });
+      }
+      if (activeCell.col >= frozenColCount) {
+        colVirtualizerRef.current.scrollToIndex(activeCell.col, { align: 'auto' });
+      }
     }
-  }, [activeCell]);
+  }, [activeCell, frozenRowCount, frozenColCount]);
 
   // Imperative scroll for ref.scrollToSelection(). Separate from the auto-scroll
   // effect above, which is left as-is: that one reacts to selection changes and
@@ -321,10 +373,11 @@ export default function VirtualGrid({
       clientWidth: el.clientWidth,
       clientHeight: el.clientHeight,
     });
-    el.scrollTop = next.scrollTop;
-    el.scrollLeft = next.scrollLeft;
+    // A selection inside a frozen band is on screen whatever the scroll.
+    if (union.endRow >= frozenRowCount) el.scrollTop = next.scrollTop;
+    if (union.endCol >= frozenColCount) el.scrollLeft = next.scrollLeft;
     return true;
-  }, [ranges]);
+  }, [ranges, frozenRowCount, frozenColCount]);
 
   useEffect(() => {
     if (!gridApiRef) return;
@@ -350,16 +403,17 @@ export default function VirtualGrid({
 
   const onCellDoubleClick = useCallback(
     (row: number, col: number) => {
-      if (mode !== 'edit') return;
+      if (!canEdit) return;
       setEditingCell({ row, col });
     },
-    [mode]
+    [canEdit]
   );
 
   const onEditCommit = useCallback(
     (row: number, col: number, value: string) => {
       if (activeSheet) {
-        const oldValue = sheetData?.data?.[row]?.[col] ?? null;
+        // A formula cell's undo restores its formula, not its last result.
+        const oldValue = sheetData ? getCellInputValue(sheetData, row, col) : null;
         setCellValue(activeSheet, row, col, value);
         pushUndo({
           sheetName: activeSheet,
@@ -450,7 +504,7 @@ export default function VirtualGrid({
             : Math.min(effectiveCols - 1, newCol + 1);
           break;
         case 'Enter':
-          if (keyboard.editing && mode === 'edit' && !editingCell) {
+          if (keyboard.editing && canEdit && !editingCell) {
             e.preventDefault();
             setEditingCell({ row: activeCell.row, col: activeCell.col });
             return;
@@ -470,7 +524,7 @@ export default function VirtualGrid({
           break;
         case 'F2':
           if (!keyboard.editing) return;
-          if (mode === 'edit') {
+          if (canEdit) {
             e.preventDefault();
             setEditingCell({ row: activeCell.row, col: activeCell.col });
             return;
@@ -493,7 +547,7 @@ export default function VirtualGrid({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activeCell, sheetData, activeSheet, setActiveCell, setSelectionRanges, setProgrammaticHighlight, effectiveRows, effectiveCols, dataRows, dataCols, mode, editingCell, keyboard]);
+  }, [activeCell, sheetData, activeSheet, setActiveCell, setSelectionRanges, setProgrammaticHighlight, effectiveRows, effectiveCols, dataRows, dataCols, canEdit, editingCell, keyboard]);
 
   // Copy/Paste handlers (Ctrl+C / Ctrl+V / Cmd+C / Cmd+V) and Escape to clear copy indicator
   useEffect(() => {
@@ -551,7 +605,7 @@ export default function VirtualGrid({
         }
       }
 
-      if (e.key === 'v' && mode === 'edit' && activeCell && activeSheet) {
+      if (e.key === 'v' && canEdit && activeCell && activeSheet) {
         e.preventDefault();
         setCopiedRange(null);
         pasteFromClipboard().then((result) => {
@@ -565,7 +619,7 @@ export default function VirtualGrid({
               const targetRow = activeCell.row + r;
               const targetCol = activeCell.col + c;
 
-              const oldValue = sheetData?.data?.[targetRow]?.[targetCol] ?? null;
+              const oldValue = sheetData ? getCellInputValue(sheetData, targetRow, targetCol) : null;
               cellChanges.push({ row: targetRow, col: targetCol, oldValue, newValue: values[r][c] });
               setCellValue(activeSheet, targetRow, targetCol, values[r][c]);
 
@@ -585,7 +639,7 @@ export default function VirtualGrid({
 
     window.addEventListener('keydown', handleCopyPaste);
     return () => window.removeEventListener('keydown', handleCopyPaste);
-  }, [sheetData, activeCell, ranges, mode, activeSheet, editingCell, setCellValue, setCellStyle, setCopiedRange, pushUndo, undo, redo, keyboard]);
+  }, [sheetData, activeCell, ranges, canEdit, activeSheet, editingCell, setCellValue, setCellStyle, setCopiedRange, pushUndo, undo, redo, keyboard]);
 
   // Build a merge lookup map: "row,col" → MergeCell for quick cell-level checks
   const mergeMap = useMemo(() => {
@@ -721,6 +775,203 @@ export default function VirtualGrid({
 
   const gridContainerClass = `sv-grid-container${resizingCol !== null ? ' sv-resizing-col' : ''}${resizingRow !== null ? ' sv-resizing-row' : ''}`;
 
+  const renderColHeader = (vc: VirtualItem) => (
+    <div
+      key={String(vc.key)}
+      className="sv-col-header"
+      style={{
+        position: 'absolute',
+        left: vc.start,
+        width: vc.size,
+        height: colHeaderHeight,
+        top: 0,
+      }}
+    >
+      {colIndexToLetter(vc.index)}
+      <div
+        className="sv-col-resize-handle"
+        title="Drag to resize, double-click to fit to content"
+        onMouseDown={(e) => onColResizeStart(e, vc.index)}
+        onDoubleClick={(e) => onColAutoFit(e, vc.index)}
+      />
+    </div>
+  );
+
+  const renderRowHeader = (vr: VirtualItem) => (
+    <div
+      key={String(vr.key)}
+      className="sv-row-header"
+      style={{
+        position: 'absolute',
+        top: vr.start,
+        height: vr.size,
+        width: rowHeaderWidth,
+        left: 0,
+      }}
+    >
+      {vr.index + 1}
+      <div
+        className="sv-row-resize-handle"
+        onMouseDown={(e) => onRowResizeStart(e, vr.index)}
+      />
+    </div>
+  );
+
+  // The line Excel draws under the last frozen row and right of the last
+  // frozen column. An inset shadow, so it never shifts the cell's content.
+  const frozenEdge = (row: number, col: number): string | undefined => {
+    const shadows: string[] = [];
+    if (frozenRowCount > 0 && row === frozenRowCount - 1) shadows.push('inset 0 -2px 0 var(--sv-color-frozen-line)');
+    if (frozenColCount > 0 && col === frozenColCount - 1) shadows.push('inset -2px 0 0 var(--sv-color-frozen-line)');
+    return shadows.length > 0 ? shadows.join(', ') : undefined;
+  };
+
+  const renderCell = (vr: VirtualItem, vc: VirtualItem) => {
+    const row = vr.index;
+    const col = vc.index;
+
+    if (hiddenCols.has(col)) return null;
+
+    // Check merge status for this cell
+    const mergeInfo = mergeMap.get(`${row},${col}`);
+    if (mergeInfo && !mergeInfo.isTopLeft) {
+      // Cell is hidden by a merge — skip rendering
+      return null;
+    }
+
+    const value = sheetData.data?.[row]?.[col] ?? '';
+
+    // Calculate cell dimensions (may span multiple cells if merged).
+    // Merged spans come from the measurement cache rather than from
+    // COL_WIDTH/ROW_HEIGHT multiples, so they track custom column
+    // widths and the current zoom instead of assuming default sizes.
+    let cellWidth = vc.size;
+    let cellHeight = vr.size;
+    if (mergeInfo && mergeInfo.isTopLeft) {
+      const m = mergeInfo.merge;
+      const mergeBox = getRangeBox(
+        { startRow: m.s.r, startCol: m.s.c, endRow: m.e.r, endCol: m.e.c },
+        rowVirtualizer.measurementsCache,
+        colVirtualizer.measurementsCache
+      );
+      if (mergeBox) {
+        cellWidth = mergeBox.width;
+        cellHeight = mergeBox.height;
+      }
+    }
+
+    // Check if this cell is being edited
+    if (
+      editingCell &&
+      editingCell.row === row &&
+      editingCell.col === col
+    ) {
+      const cellValidation = sheetData.validations?.[`${row},${col}`];
+      return (
+        <EditableCell
+          key={`${vr.key}-${vc.key}`}
+          row={row}
+          col={col}
+          // A dropdown starts on what the cell shows; a text editor on the
+          // formula behind it, as in Excel.
+          value={
+            cellValidation?.type === 'list' ? value : getCellInputValue(sheetData, row, col) ?? ''
+          }
+          validation={cellValidation}
+          tabNavigation={tabNavigation && keyboard.navigation}
+          style={{
+            position: 'absolute',
+            top: vr.start,
+            left: vc.start,
+            width: cellWidth,
+            height: cellHeight,
+          }}
+          onCommit={onEditCommit}
+          onCancel={onEditCancel}
+        />
+      );
+    }
+
+    // Look up cell style, comment, and conditional format
+    let cellStyle = sheetData.styles?.[`${row},${col}`];
+    const cellComment = sheetData.comments?.[`${row},${col}`];
+    const cellHyperlink = sheetData.hyperlinks?.[`${row},${col}`];
+
+    // Overlay conditional formatting styles (if rules exist)
+    if (sheetData.conditionalFormats && sheetData.conditionalFormats.length > 0) {
+      const cfStyle = evaluateConditionalFormats(row, col, value, sheetData.conditionalFormats, sheetData);
+      if (cfStyle) {
+        cellStyle = cellStyle ? { ...cellStyle, ...cfStyle } : cfStyle;
+      }
+    }
+
+    // Determine search match state for this cell
+    const searchMatchIdx = searchMatches.findIndex(
+      (m) => m.row === row && m.col === col
+    );
+    const isSearchActive = searchMatchIdx !== -1 && searchMatchIdx === searchActiveIndex;
+    const isSearchMatch = searchMatchIdx !== -1 && !isSearchActive;
+
+    // Grid lines that cover this cell
+    const cellGridLines = parsedGridLines
+      ? parsedGridLines.filter((glc) =>
+          isCellInRanges(row, col, [glc.parsedRange])
+        )
+      : undefined;
+
+    return (
+      <Cell
+        key={`${vr.key}-${vc.key}`}
+        rowIndex={row}
+        columnIndex={col}
+        value={value}
+        format={sheetData.formats?.[`${row},${col}`]}
+        ranges={highlightable ? ranges : EMPTY_RANGES}
+        activeCell={highlightable ? activeCell : null}
+        cellStyle={cellStyle}
+        comment={cellComment}
+        hyperlink={cellHyperlink}
+        linkRequiresModifier={mode === 'edit'}
+        isMerged={!!mergeInfo}
+        onCellClick={onCellClick}
+        onCellMouseDown={onCellMouseDown}
+        onCellMouseEnter={onCellMouseEnter}
+        onCellDoubleClick={onCellDoubleClick}
+        highlightColor={highlightColor}
+        highlightBorderColor={highlightBorderColor}
+        isProgrammaticHighlight={isProgrammaticHighlight}
+        isSearchMatch={isSearchMatch}
+        isSearchActive={isSearchActive}
+        gridLineBorders={cellGridLines && cellGridLines.length > 0 ? cellGridLines : undefined}
+        style={{
+          position: 'absolute',
+          top: vr.start,
+          left: vc.start,
+          width: cellWidth,
+          height: cellHeight,
+          boxShadow: frozenEdge(row, col),
+        }}
+      />
+    );
+  };
+
+  const bodyCells: React.ReactNode[] = [];
+  const topCells: React.ReactNode[] = [];
+  const leftCells: React.ReactNode[] = [];
+  const cornerCells: React.ReactNode[] = [];
+  for (const vr of virtualRows) {
+    for (const vc of virtualCols) {
+      const node = renderCell(vr, vc);
+      if (!node) continue;
+      const inTop = vr.index < frozenRowCount;
+      const inLeft = vc.index < frozenColCount;
+      if (inTop && inLeft) cornerCells.push(node);
+      else if (inTop) topCells.push(node);
+      else if (inLeft) leftCells.push(node);
+      else bodyCells.push(node);
+    }
+  }
+
   return (
     <div className={gridContainerClass}>
       {/* Top-left corner */}
@@ -751,29 +1002,23 @@ export default function VirtualGrid({
             position: 'relative',
           }}
         >
-          {virtualCols.map((vc) => (
-            <div
-              key={String(vc.key)}
-              className="sv-col-header"
-              style={{
-                position: 'absolute',
-                left: vc.start,
-                width: vc.size,
-                height: colHeaderHeight,
-                top: 0,
-              }}
-            >
-              {colIndexToLetter(vc.index)}
-              <div
-                className="sv-col-resize-handle"
-                title="Drag to resize, double-click to fit to content"
-                onMouseDown={(e) => onColResizeStart(e, vc.index)}
-                onDoubleClick={(e) => onColAutoFit(e, vc.index)}
-              />
-            </div>
-          ))}
+          {virtualCols
+            .filter((vc) => vc.index >= frozenColCount && !hiddenCols.has(vc.index))
+            .map(renderColHeader)}
         </div>
       </div>
+
+      {/* Frozen column headers stay put while the band above scrolls */}
+      {frozenColCount > 0 && (
+        <div
+          className="sv-col-headers sv-col-headers-frozen"
+          style={{ left: rowHeaderWidth, width: frozenWidth, height: colHeaderHeight }}
+        >
+          {virtualCols
+            .filter((vc) => vc.index < frozenColCount && !hiddenCols.has(vc.index))
+            .map(renderColHeader)}
+        </div>
+      )}
 
       {/* Row headers */}
       <div
@@ -793,27 +1038,18 @@ export default function VirtualGrid({
             position: 'relative',
           }}
         >
-          {virtualRows.map((vr) => (
-            <div
-              key={String(vr.key)}
-              className="sv-row-header"
-              style={{
-                position: 'absolute',
-                top: vr.start,
-                height: vr.size,
-                width: rowHeaderWidth,
-                left: 0,
-              }}
-            >
-              {vr.index + 1}
-              <div
-                className="sv-row-resize-handle"
-                onMouseDown={(e) => onRowResizeStart(e, vr.index)}
-              />
-            </div>
-          ))}
+          {virtualRows.filter((vr) => vr.index >= frozenRowCount).map(renderRowHeader)}
         </div>
       </div>
+
+      {frozenRowCount > 0 && (
+        <div
+          className="sv-row-headers sv-row-headers-frozen"
+          style={{ top: colHeaderHeight, width: rowHeaderWidth, height: frozenHeight }}
+        >
+          {virtualRows.filter((vr) => vr.index < frozenRowCount).map(renderRowHeader)}
+        </div>
+      )}
 
       {/* Main scrollable grid area */}
       <div
@@ -838,129 +1074,18 @@ export default function VirtualGrid({
             position: 'relative',
           }}
         >
-          {/* Render visible cells */}
-          {virtualRows.map((vr) =>
-            virtualCols.map((vc) => {
-              const row = vr.index;
-              const col = vc.index;
-
-              // Check merge status for this cell
-              const mergeInfo = mergeMap.get(`${row},${col}`);
-              if (mergeInfo && !mergeInfo.isTopLeft) {
-                // Cell is hidden by a merge — skip rendering
-                return null;
-              }
-
-              const value = sheetData.data?.[row]?.[col] ?? '';
-
-              // Calculate cell dimensions (may span multiple cells if merged).
-              // Merged spans come from the measurement cache rather than from
-              // COL_WIDTH/ROW_HEIGHT multiples, so they track custom column
-              // widths and the current zoom instead of assuming default sizes.
-              let cellWidth = vc.size;
-              let cellHeight = vr.size;
-              if (mergeInfo && mergeInfo.isTopLeft) {
-                const m = mergeInfo.merge;
-                const mergeBox = getRangeBox(
-                  { startRow: m.s.r, startCol: m.s.c, endRow: m.e.r, endCol: m.e.c },
-                  rowVirtualizer.measurementsCache,
-                  colVirtualizer.measurementsCache
-                );
-                if (mergeBox) {
-                  cellWidth = mergeBox.width;
-                  cellHeight = mergeBox.height;
-                }
-              }
-
-              // Check if this cell is being edited
-              if (
-                editingCell &&
-                editingCell.row === row &&
-                editingCell.col === col
-              ) {
-                const cellValidation = sheetData.validations?.[`${row},${col}`];
-                return (
-                  <EditableCell
-                    key={`${vr.key}-${vc.key}`}
-                    row={row}
-                    col={col}
-                    value={value}
-                    validation={cellValidation}
-                    tabNavigation={tabNavigation && keyboard.navigation}
-                    style={{
-                      position: 'absolute',
-                      top: vr.start,
-                      left: vc.start,
-                      width: cellWidth,
-                      height: cellHeight,
-                    }}
-                    onCommit={onEditCommit}
-                    onCancel={onEditCancel}
-                  />
-                );
-              }
-
-              // Look up cell style, comment, and conditional format
-              let cellStyle = sheetData.styles?.[`${row},${col}`];
-              const cellComment = sheetData.comments?.[`${row},${col}`];
-              const cellHyperlink = sheetData.hyperlinks?.[`${row},${col}`];
-
-              // Overlay conditional formatting styles (if rules exist)
-              if (sheetData.conditionalFormats && sheetData.conditionalFormats.length > 0) {
-                const cfStyle = evaluateConditionalFormats(row, col, value, sheetData.conditionalFormats, sheetData);
-                if (cfStyle) {
-                  cellStyle = cellStyle ? { ...cellStyle, ...cfStyle } : cfStyle;
-                }
-              }
-
-              // Determine search match state for this cell
-              const searchMatchIdx = searchMatches.findIndex(
-                (m) => m.row === row && m.col === col
-              );
-              const isSearchActive = searchMatchIdx !== -1 && searchMatchIdx === searchActiveIndex;
-              const isSearchMatch = searchMatchIdx !== -1 && !isSearchActive;
-
-              // Grid lines that cover this cell
-              const cellGridLines = parsedGridLines
-                ? parsedGridLines.filter((glc) =>
-                    isCellInRanges(row, col, [glc.parsedRange])
-                  )
-                : undefined;
-
-              return (
-                <Cell
-                  key={`${vr.key}-${vc.key}`}
-                  rowIndex={row}
-                  columnIndex={col}
-                  value={value}
-                  ranges={highlightable ? ranges : EMPTY_RANGES}
-                  activeCell={highlightable ? activeCell : null}
-                  cellStyle={cellStyle}
-                  comment={cellComment}
-                  hyperlink={cellHyperlink}
-                  linkRequiresModifier={mode === 'edit'}
-                  isMerged={!!mergeInfo}
-                  onCellClick={onCellClick}
-                  onCellMouseDown={onCellMouseDown}
-                  onCellMouseEnter={onCellMouseEnter}
-                  onCellDoubleClick={onCellDoubleClick}
-                  highlightColor={highlightColor}
-                  highlightBorderColor={highlightBorderColor}
-                  isProgrammaticHighlight={isProgrammaticHighlight}
-                  isSearchMatch={isSearchMatch}
-                  isSearchActive={isSearchActive}
-                  gridLineBorders={cellGridLines && cellGridLines.length > 0 ? cellGridLines : undefined}
-                  style={{
-                    position: 'absolute',
-                    top: vr.start,
-                    left: vc.start,
-                    width: cellWidth,
-                    height: cellHeight,
-                  }}
-                />
-              );
-            })
+          {/* Frozen panes: sticky layers, drawn over the scrolling cells. Each
+              layer is zero-sized and in normal flow, so CSS sticky pins it to
+              the viewport edge while its absolutely placed cells keep their
+              content coordinates. */}
+          {cornerCells.length > 0 && (
+            <div className="sv-frozen-layer sv-frozen-corner">{cornerCells}</div>
           )}
+          {topCells.length > 0 && <div className="sv-frozen-layer sv-frozen-top">{topCells}</div>}
+          {leftCells.length > 0 && <div className="sv-frozen-layer sv-frozen-left">{leftCells}</div>}
+
+          {/* Render visible cells */}
+          {bodyCells}
 
           {/*
             Highlight area anchor — one invisible element spanning the entire

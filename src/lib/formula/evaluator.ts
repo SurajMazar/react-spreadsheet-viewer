@@ -5,7 +5,7 @@
  */
 
 import type { ASTNode } from './parser';
-import { FUNCTIONS, type FormulaValue } from './functions';
+import { FUNCTIONS, type FormulaFunction, type FormulaValue } from './functions';
 import { colLetterToIndex } from '../utils/rangeParser';
 
 /** Interface for resolving cell values from the sheet */
@@ -25,6 +25,7 @@ export function evaluate(
   node: ASTNode,
   resolver: CellResolver,
   visiting?: Set<string>,
+  functions: Record<string, FormulaFunction> = FUNCTIONS,
 ): FormulaValue {
   switch (node.kind) {
     case 'number':
@@ -66,7 +67,7 @@ export function evaluate(
     }
 
     case 'unaryOp': {
-      const operand = evaluate(node.operand, resolver, visiting);
+      const operand = evaluate(node.operand, resolver, visiting, functions);
       if (node.op === '-') {
         if (typeof operand === 'number') return -operand;
         const n = Number(operand);
@@ -77,13 +78,19 @@ export function evaluate(
     }
 
     case 'binaryOp':
-      return evaluateBinaryOp(node.op, node.left, node.right, resolver, visiting);
+      return evaluateBinaryOp(node.op, node.left, node.right, resolver, visiting, functions);
 
     case 'functionCall': {
-      const fn = FUNCTIONS[node.name.toUpperCase()];
+      const fn = functions[node.name.toUpperCase()];
       if (!fn) return `#NAME? ${node.name}`;
-      const args = node.args.map((a) => evaluate(a, resolver, visiting));
-      return fn(...args);
+      const args = node.args.map((a) => evaluate(a, resolver, visiting, functions));
+      try {
+        return fn(...args);
+      } catch {
+        // A throwing function (a custom one, typically) must not take the
+        // whole recalculation down with it.
+        return '#VALUE!';
+      }
     }
 
     default:
@@ -96,10 +103,11 @@ function evaluateBinaryOp(
   leftNode: ASTNode,
   rightNode: ASTNode,
   resolver: CellResolver,
-  visiting?: Set<string>,
+  visiting: Set<string> | undefined,
+  functions: Record<string, FormulaFunction>,
 ): FormulaValue {
-  const left = evaluate(leftNode, resolver, visiting);
-  const right = evaluate(rightNode, resolver, visiting);
+  const left = evaluate(leftNode, resolver, visiting, functions);
+  const right = evaluate(rightNode, resolver, visiting, functions);
 
   // String concatenation
   if (op === '&') {
