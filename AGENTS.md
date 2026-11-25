@@ -376,7 +376,9 @@ Test files follow the `__tests__/` directory convention next to the code they te
 - `src/lib/hooks/__tests__/useSourceLoader.test.ts` — 4 tests for source normalization
 - `src/lib/__tests__/SheetViewer.test.tsx` — 28 integration tests for the root component and imperative handle
 - `src/lib/components/Grid/__tests__/Cell.test.tsx` — 42 tests (rendering, selection, merged cells, text wrapping, comments)
-- `src/lib/components/Grid/__tests__/EditableCell.test.tsx` — 14 tests for editable cell
+- `src/lib/components/Grid/__tests__/EditableCell.test.tsx` — 18 tests for editable cell (commit moves, validation)
+- `src/lib/components/Grid/__tests__/stepCell.test.ts` — 3 tests for the cell a committed edit moves to
+- `src/lib/__tests__/SheetViewer.keyboardEditing.test.tsx` — 11 integration tests for editing from the keyboard (Enter/Tab moves, F2, type-to-edit, Alt+Down)
 - `src/lib/context/__tests__/ViewerContext.test.ts` — 41 tests for store actions (including setCellStyle, setColumnWidth, setRowHeight, setCellComment, undo/redo)
 - `src/lib/formula/__tests__/parser.test.ts` — 39 tests for formula tokenizer and parser
 - `src/lib/formula/__tests__/evaluator.test.ts` — 41 tests for formula evaluation and cell resolution
@@ -632,6 +634,15 @@ Added to replace the Syncfusion spreadsheet in Docsumo's Excel review screen —
 - Frozen panes (`frozenRows`/`frozenCols`): the virtualizers pin the frozen indexes with a `rangeExtractor` (`withPinned`) and use `scrollPaddingStart` so scrollToIndex treats cells under the frozen band as hidden. Frozen cells render in three zero-sized, in-flow `position: sticky` layers inside the sizer (`.sv-frozen-top/-left/-corner`), so they keep content coordinates and need no scroll listener. Frozen headers are separate, non-translated header bands (`.sv-col-headers-frozen`, `.sv-row-headers-frozen`). Clicking a frozen cell does not scroll that axis. The divider is an inset box-shadow (`--sv-color-frozen-line`).
 - `textAlign` now also sets `justify-content` (the cell is a flex row, so `text-align` alone never moved the text). A list-validated cell's dropdown starts on the shown value, not the formula.
 - Demo: `?demo=data` (`src/demo/DataDemo.tsx`) shows all of the above on a P&L-shaped workbook.
+
+### Spreadsheet-style editing keys (2.6.0)
+The keys follow Syncfusion's spreadsheet (and Excel), so a Syncfusion user finds nothing changed:
+- In the editor, Enter saves and moves down, Shift+Enter up, Tab right, Shift+Tab left. `EditableCell` passes the direction as `onCommit`'s fourth argument (`CommitMove`). `VirtualGrid.onEditCommit` saves, then steps with `Grid/stepCell.ts` (clamped to the grid, unit-tested) through `moveActiveCellTo`, the same helper the arrow keys use. The move is gated by the `navigation` group. A blur (click-away) commit passes no direction and stays put; so does the list dropdown.
+- On a selected cell, Enter and Shift+Enter move down and up. They used to open the editor; F2 does that now, as does typing.
+- Typing a character on a selected cell opens the editor with that character in place of the value, caret at the end (`EditingCell.initialText` → `EditableCell` `initialText`). Keys with Ctrl/Cmd/Alt, IME composition, list cells, and keys whose target is an editable or interactive element of the host page (`TYPING_TARGET_SELECTOR`, or contenteditable) never start an edit, because the listener is on `window`.
+- Alt+Down opens a list cell's dropdown, the keyboard route Enter used to be.
+
+`__tests__/SheetViewer.keyboardEditing.test.tsx` drives this through the real viewer. It stubs `getBoundingClientRect`/`offsetWidth`/`offsetHeight` so jsdom gives the grid a size and the virtualizer renders cells and the editor.
 
 ### Merged cells scrolled partly out of view (2.5.2)
 The grid draws a merged cell only from its top-left cell, and only cells inside the virtual window are drawn. A merge whose top-left cell had scrolled out (a title spanning A:O once column A left the view, or a tall merge once its first row did) vanished although most of it was on screen. After the normal loop, `offscreenMergeAnchors` (exported from VirtualGrid, unit-tested) lists merges that cross the window without their anchor, and the grid draws each one from the virtualizer's `measurementsCache` entry for that anchor cell.

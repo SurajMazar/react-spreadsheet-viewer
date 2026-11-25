@@ -7,7 +7,8 @@ import { scaleToZoom } from '../../utils/zoom';
 import { computeAutoFitWidth, createCanvasTextMeasurer, resolveAutoFitFont } from '../../utils/autoFit';
 import { extractCellsFromRange, extractStylesFromRange, copyRangeToClipboard, pasteFromClipboard } from '../../utils/clipboard';
 import Cell from './Cell';
-import EditableCell from './EditableCell';
+import EditableCell, { type CommitMove } from './EditableCell';
+import { stepCell } from './stepCell';
 import ChartOverlays from '../ChartOverlays';
 import { evaluateConditionalFormats } from '../../conditionalFormat/evaluator';
 import { ALL_KEYBOARD_INTERACTIONS, type ResolvedKeyboardConfig } from '../../utils/keyboard';
@@ -54,7 +55,13 @@ export const COL_HEADER_HEIGHT = 28;
 interface EditingCell {
   row: number;
   col: number;
+  /** The text typed on the selected cell that opened the editor, if typing did. */
+  initialText?: string;
 }
+
+/** Keys from these elements are the host page's typing, never the start of a cell edit. */
+const TYPING_TARGET_SELECTOR =
+  'input, textarea, select, button, a[href], [contenteditable=""], [contenteditable="true"], [role="textbox"], [role="combobox"]';
 
 /** Internal imperative surface, so SheetViewer's handle can reach the scroll container. */
 export interface VirtualGridApi {
@@ -440,8 +447,22 @@ export default function VirtualGrid({
     [canEdit]
   );
 
+  // Make (row, col) the active cell and the selection, as a keyboard move does.
+  const moveActiveCellTo = useCallback(
+    (row: number, col: number) => {
+      setProgrammaticHighlight(false);
+      setActiveCell(row, col);
+      const label = `${colIndexToLetter(col)}${row + 1}`;
+      if (activeSheet) {
+        const singleRange = { startRow: row, startCol: col, endRow: row, endCol: col };
+        setSelectionRanges(activeSheet, [singleRange], label);
+      }
+    },
+    [activeSheet, setActiveCell, setSelectionRanges, setProgrammaticHighlight]
+  );
+
   const onEditCommit = useCallback(
-    (row: number, col: number, value: string) => {
+    (row: number, col: number, value: string, move?: CommitMove) => {
       if (activeSheet) {
         // A formula cell's undo restores its formula, not its last result.
         const oldValue = sheetData ? getCellInputValue(sheetData, row, col) : null;
@@ -453,8 +474,13 @@ export default function VirtualGrid({
         });
       }
       setEditingCell(null);
+      // Enter and Tab commit and step on, like a spreadsheet; a click-away commit stays put.
+      if (move && keyboard.navigation) {
+        const next = stepCell(row, col, move, effectiveRows, effectiveCols);
+        moveActiveCellTo(next.row, next.col);
+      }
     },
-    [activeSheet, setCellValue, sheetData, pushUndo]
+    [activeSheet, setCellValue, sheetData, pushUndo, keyboard.navigation, effectiveRows, effectiveCols, moveActiveCellTo]
   );
 
   const onEditCancel = useCallback(() => {
@@ -516,6 +542,14 @@ export default function VirtualGrid({
           newRow = Math.max(0, newRow - 1);
           break;
         case 'ArrowDown':
+          // Alt+Down opens a list cell's dropdown, as in Excel.
+          if (e.altKey && keyboard.editing && canEdit) {
+            if (sheetData.validations?.[`${activeCell.row},${activeCell.col}`]?.type === 'list') {
+              e.preventDefault();
+              setEditingCell({ row: activeCell.row, col: activeCell.col });
+            }
+            return;
+          }
           if (!keyboard.navigation) return;
           newRow = Math.min(effectiveRows - 1, newRow + 1);
           break;
@@ -535,13 +569,10 @@ export default function VirtualGrid({
             : Math.min(effectiveCols - 1, newCol + 1);
           break;
         case 'Enter':
-          if (keyboard.editing && canEdit && !editingCell) {
-            e.preventDefault();
-            setEditingCell({ row: activeCell.row, col: activeCell.col });
-            return;
-          }
+          // As in Excel: Enter steps down (Shift+Enter up); F2, a double-click
+          // or typing opens the editor.
           if (!keyboard.navigation) return;
-          newRow = Math.min(effectiveRows - 1, newRow + 1);
+          newRow = e.shiftKey ? Math.max(0, newRow - 1) : Math.min(effectiveRows - 1, newRow + 1);
           break;
         case 'Home':
           if (!keyboard.navigation) return;
@@ -562,23 +593,27 @@ export default function VirtualGrid({
           }
           if (!keyboard.navigation) return;
           break;
-        default:
+        default: {
+          // Typing a character on the selected cell starts an edit that
+          // replaces its value, as in a spreadsheet.
+          const isCharacter = e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey;
+          if (!isCharacter || e.isComposing || !keyboard.editing || !canEdit) return;
+          if (target.isContentEditable || target.closest(TYPING_TARGET_SELECTOR)) return;
+          // A list cell takes its value from the dropdown, not free text.
+          if (sheetData.validations?.[`${activeCell.row},${activeCell.col}`]?.type === 'list') return;
+          e.preventDefault();
+          setEditingCell({ row: activeCell.row, col: activeCell.col, initialText: e.key });
           return;
+        }
       }
 
       e.preventDefault();
-      setProgrammaticHighlight(false);
-      setActiveCell(newRow, newCol);
-      const label = `${colIndexToLetter(newCol)}${newRow + 1}`;
-      if (activeSheet) {
-        const singleRange = { startRow: newRow, startCol: newCol, endRow: newRow, endCol: newCol };
-        setSelectionRanges(activeSheet, [singleRange], label);
-      }
+      moveActiveCellTo(newRow, newCol);
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activeCell, sheetData, activeSheet, setActiveCell, setSelectionRanges, setProgrammaticHighlight, effectiveRows, effectiveCols, dataRows, dataCols, canEdit, editingCell, keyboard]);
+  }, [activeCell, sheetData, moveActiveCellTo, effectiveRows, effectiveCols, dataRows, dataCols, canEdit, editingCell, keyboard]);
 
   // Copy/Paste handlers (Ctrl+C / Ctrl+V / Cmd+C / Cmd+V) and Escape to clear copy indicator
   useEffect(() => {
@@ -909,6 +944,7 @@ export default function VirtualGrid({
             cellValidation?.type === 'list' ? value : getCellInputValue(sheetData, row, col) ?? ''
           }
           validation={cellValidation}
+          initialText={editingCell.initialText}
           tabNavigation={tabNavigation && keyboard.navigation}
           style={{
             position: 'absolute',

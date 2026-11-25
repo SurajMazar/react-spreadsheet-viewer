@@ -555,7 +555,12 @@ Enable inline cell editing:
 />
 ```
 
-Double-click a cell to start editing. Press Enter to confirm or Escape to cancel.
+Start editing a cell by double-clicking it, pressing F2, or just typing on the
+selected cell (what you type replaces its value). In the editor, Enter saves and
+moves down, Shift+Enter saves and moves up, Tab and Shift+Tab save and move right
+and left, and Escape cancels. Clicking away saves and stays on the cell. On a
+selected cell that is not being edited, Enter and Shift+Enter move down and up,
+as in Excel.
 
 ---
 
@@ -612,8 +617,8 @@ Pass an object to disable individual groups and leave the rest working:
 
 | Group | Default | Keys |
 | --- | --- | --- |
-| `navigation` | `true` | Arrow keys, Tab / Shift+Tab, Enter, Home, End — plus everything the browser would do by itself, see below |
-| `editing` | `true` | Enter and F2 to open the cell editor (edit mode only) |
+| `navigation` | `true` | Arrow keys, Tab / Shift+Tab, Enter / Shift+Enter, Home, End, and the move after Enter or Tab saves an edit — plus everything the browser would do by itself, see below |
+| `editing` | `true` | F2, typing on the selected cell, and Alt+Down on a list cell open the cell editor (edit mode only) |
 | `clipboard` | `true` | Ctrl/Cmd+C, Ctrl/Cmd+V, Escape to clear the copy marquee |
 | `history` | `true` | Ctrl/Cmd+Z, Ctrl/Cmd+Y, Ctrl/Cmd+Shift+Z |
 | `search` | `true` | Ctrl/Cmd+F to open search, Escape to close it |
@@ -636,8 +641,9 @@ Notes:
 
 - Typing inside the viewer's own inputs is never affected. Once the cell editor,
   the range box, or the search box has focus, text entry works normally — arrow keys
-  move the caret, and Enter commits an edit — because the editor is opened by mouse
-  and would otherwise have no way to finish. This prop governs shortcuts, focus and
+  move the caret, and Enter commits an edit — because the editor can be opened by
+  mouse and would otherwise have no way to finish. With `navigation` off, Enter
+  and Tab still save an edit but leave the active cell where it is. This prop governs shortcuts, focus and
   grid navigation, not text entry.
 - `tabNavigation` applies on top of `navigation`: Tab moves between cells, and
   commits from the cell editor, only when both are enabled.
@@ -951,7 +957,7 @@ const data: WorkbookInput = {
 - `meta` is never read by the viewer — it carries whatever the host needs (a source position, an id, a confidence flag) through edits and back out of `getCellRows()`.
 - `colSpan` / `rowSpan` on a cell merge it with its neighbours.
 - `frozenRows` / `frozenCols` keep the top rows and left columns (and their headers) in view while the rest scrolls, at any zoom. Clicking a frozen cell does not scroll the grid.
-- A cell with a list `validation` shows a ▼ button when it is selected in edit mode. The button, a double-click or Enter opens the list of allowed values under the cell (it opens upwards near the bottom of the grid). Arrow keys, Home/End and typing a letter move through it; Enter or a click picks, Escape or clicking away cancels. The list starts on the value the cell shows; picking replaces a formula in that cell with the picked value.
+- A cell with a list `validation` shows a ▼ button when it is selected in edit mode. The button, a double-click, F2 or Alt+Down opens the list of allowed values under the cell (it opens upwards near the bottom of the grid). Arrow keys, Home/End and typing a letter move through it; Enter or a click picks, Escape or clicking away cancels. The list starts on the value the cell shows; picking replaces a formula in that cell with the picked value.
 - `onCellChange` reports the cell the user changed (typing, paste, undo/redo). Updates made through the ref are silent.
 - Keep `data` and `customFunctions` stable between renders (`useMemo`): a new `data` object reloads the workbook, and new function identities recalculate.
 

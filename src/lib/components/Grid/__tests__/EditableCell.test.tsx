@@ -72,19 +72,54 @@ describe('EditableCell — User input', () => {
 // Keyboard Handling
 // =============================================
 describe('EditableCell — Keyboard handling', () => {
-  it('calls onCommit with current value on Enter', () => {
+  it('commits the current value on Enter and asks to move down', () => {
     const { onCommit } = renderEditable({ value: 'Test' });
     const input = screen.getByRole('textbox');
     fireEvent.change(input, { target: { value: 'Updated' } });
     fireEvent.keyDown(input, { key: 'Enter' });
-    expect(onCommit).toHaveBeenCalledWith(2, 3, 'Updated');
+    expect(onCommit).toHaveBeenCalledWith(2, 3, 'Updated', 'down');
   });
 
-  it('calls onCommit with current value on Tab', () => {
+  it('asks to move up on Shift+Enter', () => {
+    const { onCommit } = renderEditable({ value: 'Test' });
+    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter', shiftKey: true });
+    expect(onCommit).toHaveBeenCalledWith(2, 3, 'Test', 'up');
+  });
+
+  it('commits the current value on Tab and asks to move right', () => {
     const { onCommit } = renderEditable({ value: 'Tab test' });
     const input = screen.getByRole('textbox');
     fireEvent.keyDown(input, { key: 'Tab' });
-    expect(onCommit).toHaveBeenCalledWith(2, 3, 'Tab test');
+    expect(onCommit).toHaveBeenCalledWith(2, 3, 'Tab test', 'right');
+  });
+
+  it('asks to move left on Shift+Tab', () => {
+    const { onCommit } = renderEditable({ value: 'Tab test' });
+    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Tab', shiftKey: true });
+    expect(onCommit).toHaveBeenCalledWith(2, 3, 'Tab test', 'left');
+  });
+
+  it('leaves Tab to the browser when tab navigation is off', () => {
+    const onCommit = vi.fn();
+    render(<EditableCell {...baseProps} onCommit={onCommit} tabNavigation={false} />);
+    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Tab' });
+    expect(onCommit).not.toHaveBeenCalled();
+  });
+
+  it('does not commit or move when the value fails validation', () => {
+    const onCommit = vi.fn();
+    render(
+      <EditableCell
+        {...baseProps}
+        value=""
+        onCommit={onCommit}
+        validation={{ type: 'number', min: 10 }}
+      />
+    );
+    const input = screen.getByRole('textbox');
+    fireEvent.change(input, { target: { value: '5' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(onCommit).not.toHaveBeenCalled();
   });
 
   it('calls onCancel on Escape (discards edits)', () => {
@@ -115,6 +150,7 @@ describe('EditableCell — Blur (commit on focus loss)', () => {
     const input = screen.getByRole('textbox');
     fireEvent.change(input, { target: { value: 'Modified' } });
     fireEvent.blur(input);
+    // A click-away commit stays on the cell: no move.
     expect(onCommit).toHaveBeenCalledWith(2, 3, 'Modified');
   });
 });

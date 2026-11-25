@@ -478,15 +478,18 @@ export interface SheetViewerLoadingState {
  */
 export interface SheetViewerKeyboardConfig {
   /**
-   * Arrow keys, Tab/Shift+Tab, Enter, Home and End move the active cell.
-   * Default: true.
+   * Arrow keys, Tab/Shift+Tab, Enter/Shift+Enter, Home and End move the
+   * active cell, as does saving an edit with Enter or Tab. Default: true.
    *
    * Turning this off also takes the viewer off the keyboard entirely: the
    * browser's own scrolling of the grid is suppressed, and the viewer's
    * controls leave the tab order so Tab walks past the whole component.
    */
   navigation?: boolean;
-  /** Enter and F2 open the cell editor (edit mode only). Default: true */
+  /**
+   * F2, typing on the selected cell, and Alt+Down on a list cell open the
+   * cell editor (edit mode only). Default: true
+   */
   editing?: boolean;
   /** Ctrl/Cmd+C, Ctrl/Cmd+V, and Escape to clear the copy marquee. Default: true */
   clipboard?: boolean;
