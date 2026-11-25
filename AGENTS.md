@@ -378,7 +378,8 @@ Test files follow the `__tests__/` directory convention next to the code they te
 - `src/lib/components/Grid/__tests__/Cell.test.tsx` — 42 tests (rendering, selection, merged cells, text wrapping, comments)
 - `src/lib/components/Grid/__tests__/EditableCell.test.tsx` — 18 tests for editable cell (commit moves, validation)
 - `src/lib/components/Grid/__tests__/stepCell.test.ts` — 3 tests for the cell a committed edit moves to
-- `src/lib/__tests__/SheetViewer.keyboardEditing.test.tsx` — 11 integration tests for editing from the keyboard (Enter/Tab moves, F2, type-to-edit, Alt+Down)
+- `src/lib/context/__tests__/ViewerContext.undoSelection.test.ts` — 7 tests for where undo/redo leave the selection
+- `src/lib/__tests__/SheetViewer.keyboardEditing.test.tsx` — 12 integration tests for editing from the keyboard (Enter/Tab moves, F2, type-to-edit, Alt+Down, undo back to the edited cell)
 - `src/lib/context/__tests__/ViewerContext.test.ts` — 41 tests for store actions (including setCellStyle, setColumnWidth, setRowHeight, setCellComment, undo/redo)
 - `src/lib/formula/__tests__/parser.test.ts` — 39 tests for formula tokenizer and parser
 - `src/lib/formula/__tests__/evaluator.test.ts` — 41 tests for formula evaluation and cell resolution
@@ -641,6 +642,7 @@ The keys follow Syncfusion's spreadsheet (and Excel), so a Syncfusion user finds
 - On a selected cell, Enter and Shift+Enter move down and up. They used to open the editor; F2 does that now, as does typing.
 - Typing a character on a selected cell opens the editor with that character in place of the value, caret at the end (`EditingCell.initialText` → `EditableCell` `initialText`). Keys with Ctrl/Cmd/Alt, IME composition, list cells, and keys whose target is an editable or interactive element of the host page (`TYPING_TARGET_SELECTOR`, or contenteditable) never start an edit, because the listener is on `window`.
 - Alt+Down opens a list cell's dropdown, the keyboard route Enter used to be.
+- Undo and redo select what they changed: `selectionAfter` in `ViewerContext.tsx` makes the entry's sheet active, selects the box around its cell and style changes, and puts the active cell on the box's top-left, so the grid's auto-scroll brings it into view. It lives in the store, so `ref.undo()`/`ref.redo()` behave the same as Ctrl+Z/Ctrl+Y (`context/__tests__/ViewerContext.undoSelection.test.ts`).
 
 `__tests__/SheetViewer.keyboardEditing.test.tsx` drives this through the real viewer. It stubs `getBoundingClientRect`/`offsetWidth`/`offsetHeight` so jsdom gives the grid a size and the virtualizer renders cells and the editor.
 

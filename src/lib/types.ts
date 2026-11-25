@@ -766,9 +766,12 @@ export interface SheetViewerHandle {
   getCellComment(cellRef: string, sheetName?: string): CellComment | null;
   /** Set a cell comment (edit mode). Pass null text to remove. */
   setCellComment(cellRef: string, text: string | null, author?: string, sheetName?: string): void;
-  /** Undo the last cell edit (value or style change). */
+  /**
+   * Undo the last cell edit (value or style change). Like a spreadsheet, it
+   * selects the cells it changed (switching sheet if needed), top-left active.
+   */
   undo(): void;
-  /** Redo the last undone edit. */
+  /** Redo the last undone edit, selecting the cells it changed. */
   redo(): void;
   /** Returns true if there is at least one undoable action. */
   canUndo(): boolean;
