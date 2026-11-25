@@ -30,7 +30,7 @@ A high-performance React component for viewing and editing Excel and CSV files w
 - **Download** — export the current data as `.xlsx` or `.csv`
 - **Charts from selection** — select a data range and create bar, line, pie, or area charts dynamically
 - **Copy & paste with formatting** — Ctrl+C/V with both HTML (preserving styles) and TSV clipboard formats
-- **Undo/redo** — Ctrl+Z and Ctrl+Y (or Ctrl+Shift+Z) for cell edits and paste
+- **Undo/redo** — Ctrl+Z and Ctrl+Y (or Ctrl+Shift+Z) for cell edits and paste; the grid jumps back to the cells they change
 - **Zoom** — Google Sheets-style zoom control in the formula bar, Ctrl/Cmd + scroll over the grid, or the `zoom` prop and ref API
 - **Excel column widths** — column widths set in the original workbook are preserved on render
 - **Auto-fit columns** — double-click a column header's edge to size it to its widest content
@@ -247,8 +247,8 @@ function App() {
 | `resetZoom()` | `void` | Return to 100% |
 | `getCellComment(cellRef, name?)` | `CellComment \| null` | Get comment for a cell |
 | `setCellComment(cellRef, text, author?, name?)` | `void` | Set or remove a cell comment |
-| `undo()` | `void` | Undo the last cell edit or paste |
-| `redo()` | `void` | Redo the last undone edit |
+| `undo()` | `void` | Undo the last cell edit or paste, and select the cells it changed |
+| `redo()` | `void` | Redo the last undone edit, and select the cells it changed |
 | `canUndo()` | `boolean` | Whether undo is available |
 | `canRedo()` | `boolean` | Whether redo is available |
 | `setCellValue(cellRef, value, name?)` | `void` | Set a value; a string starting with `=` sets a formula. Works in any mode, no undo entry, no `onCellChange` |
@@ -585,7 +585,13 @@ When a cell contains long text, inactive cells truncate with ellipsis. The formu
 - **Ctrl+Z** (Cmd+Z) — undo
 - **Ctrl+Y** or **Ctrl+Shift+Z** — redo
 
-Also available via ref:
+As in a spreadsheet, undo and redo move to what they change: they select the
+cells the edit touched (the box around them, for a paste or a range style) and
+make its top-left cell active, scrolling it into view. A change on another sheet
+switches to that sheet first. Where you had moved to since the edit does not
+matter.
+
+Also available via ref (with the same selection behaviour):
 
 ```tsx
 if (ref.current?.canUndo()) ref.current.undo();

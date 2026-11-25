@@ -204,6 +204,24 @@ describe('SheetViewer — editing from the keyboard', () => {
     expect(activeCell()).toBeUndefined();
   });
 
+  it('Ctrl+Z goes back to the edited cell and restores it; Ctrl+Y redoes it there', async () => {
+    const { ref } = await renderEditable();
+    select(1, 1);
+    press('5');
+    press('Enter');
+    expect(activeCell()).toBe('2,1');
+    expect(ref.current!.getCellRangeData('B2')).toEqual([['5']]);
+
+    press('z', { ctrlKey: true });
+    expect(ref.current!.getCellRangeData('B2')).toEqual([[100]]);
+    expect(activeCell()).toBe('1,1');
+
+    select(0, 0);
+    press('y', { ctrlKey: true });
+    expect(ref.current!.getCellRangeData('B2')).toEqual([['5']]);
+    expect(activeCell()).toBe('1,1');
+  });
+
   it('with navigation off, Enter in the editor commits without moving', async () => {
     const { ref } = await renderEditable({ keyboardInteractions: { navigation: false } });
     select(1, 1);

@@ -24,6 +24,7 @@ import type {
   SheetViewerFormulaFunction,
 } from '../types';
 import { recalculateSheet as recalculateSheetData } from '../formula/recalculate';
+import { colIndexToLetter } from '../utils/rangeParser';
 
 /**
  * Stable empty objects to avoid creating new references in selectors.
@@ -84,6 +85,41 @@ function changeFor(
   const first = entry.cellChanges[0];
   if (!first) return prev;
   return { sheetName: entry.sheetName, row: first.row, col: first.col, seq: (prev?.seq ?? 0) + 1 };
+}
+
+/**
+ * Where undo/redo leaves the selection, as in a spreadsheet: on the entry's
+ * sheet, selecting the box around every cell it changed, with the box's
+ * top-left cell active. An entry that changed nothing leaves state as it was.
+ */
+function selectionAfter(entry: UndoEntry, state: ViewerState): Partial<ViewerState> {
+  const cells = [...entry.cellChanges, ...entry.styleChanges];
+  if (cells.length === 0) return {};
+  let startRow = Infinity;
+  let startCol = Infinity;
+  let endRow = -Infinity;
+  let endCol = -Infinity;
+  for (const { row, col } of cells) {
+    startRow = Math.min(startRow, row);
+    startCol = Math.min(startCol, col);
+    endRow = Math.max(endRow, row);
+    endCol = Math.max(endCol, col);
+  }
+  const topLeft = `${colIndexToLetter(startCol)}${startRow + 1}`;
+  const label =
+    startRow === endRow && startCol === endCol
+      ? topLeft
+      : `${topLeft}:${colIndexToLetter(endCol)}${endRow + 1}`;
+  const prev = state.selections[entry.sheetName] || EMPTY_SELECTION;
+  return {
+    activeSheet: entry.sheetName,
+    activeCell: { row: startRow, col: startCol },
+    isProgrammaticHighlight: false,
+    selections: {
+      ...state.selections,
+      [entry.sheetName]: { ...prev, ranges: [{ startRow, startCol, endRow, endCol }], rangeInput: label },
+    },
+  };
 }
 
 /** Replace or remove one entry of a sparse "row,col" map. */
@@ -488,6 +524,7 @@ export function createViewerStore(): StoreApi<ViewerState> {
           [entry.sheetName]: recalculateSheetData({ ...nextSheet, styles: newStyles }, state.customFunctions),
         },
         lastCellChange: changeFor(entry, state.lastCellChange),
+        ...selectionAfter(entry, state),
       });
     },
 
@@ -523,6 +560,7 @@ export function createViewerStore(): StoreApi<ViewerState> {
           [entry.sheetName]: recalculateSheetData({ ...nextSheet, styles: newStyles }, state.customFunctions),
         },
         lastCellChange: changeFor(entry, state.lastCellChange),
+        ...selectionAfter(entry, state),
       });
     },
 
