@@ -28,6 +28,8 @@ export default function FormulaBar({
   const activeSheet = useViewerStore((s) => s.activeSheet);
   const activeCell = useViewerStore((s) => s.activeCell);
   const setSelectionRanges = useViewerStore((s) => s.setSelectionRanges);
+  const setActiveCell = useViewerStore((s) => s.setActiveCell);
+  const setProgrammaticHighlight = useViewerStore((s) => s.setProgrammaticHighlight);
   const setRangeInput = useViewerStore((s) => s.setRangeInput);
   const getCurrentSheetData = useViewerStore((s) => s.getCurrentSheetData);
 
@@ -56,11 +58,19 @@ export default function FormulaBar({
       if (!sheetData || !activeSheet) return;
 
       const ranges = parseRangeExpression(localInput, sheetData.rows, sheetData.cols);
+      // As in a spreadsheet, going to a cell or range makes its first cell
+      // the active cell: the formula bar shows it, the grid scrolls to it,
+      // and arrow keys carry on from there.
+      const first = ranges[0];
+      if (first) {
+        setProgrammaticHighlight(false);
+        setActiveCell(first.startRow, first.startCol);
+      }
       setSelectionRanges(activeSheet, ranges, localInput);
       setRangeInput(activeSheet, localInput);
       inputRef.current?.blur();
     },
-    [localInput, activeSheet, getCurrentSheetData, setSelectionRanges, setRangeInput]
+    [localInput, activeSheet, getCurrentSheetData, setSelectionRanges, setRangeInput, setActiveCell, setProgrammaticHighlight]
   );
 
   const handleKeyDown = useCallback(
