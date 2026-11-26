@@ -8,6 +8,7 @@ import { computeAutoFitWidth, createCanvasTextMeasurer, resolveAutoFitFont } fro
 import { extractCellsFromRange, extractStylesFromRange, copyRangeToClipboard, readClipboardData } from '../../utils/clipboard';
 import Cell from './Cell';
 import EditableCell, { type CommitMove } from './EditableCell';
+import { gridExtent } from './gridExtent';
 import { stepCell } from './stepCell';
 import ChartOverlays from '../ChartOverlays';
 import { evaluateConditionalFormats } from '../../conditionalFormat/evaluator';
@@ -228,8 +229,7 @@ export default function VirtualGrid({
   // Measured against the zoomed cell size, so zooming out still fills the page.
   const visibleCols = Math.ceil(containerSize.width / scaleToZoom(COL_WIDTH, zoom));
   const visibleRows = Math.ceil(containerSize.height / scaleToZoom(ROW_HEIGHT, zoom));
-  const effectiveCols = Math.max(dataCols, visibleCols + 5);
-  const effectiveRows = Math.max(dataRows, visibleRows + 10);
+  const { rows: effectiveRows, cols: effectiveCols } = gridExtent(dataRows, dataCols, visibleRows, visibleCols);
 
   // Base (unzoomed) sizes: what the store holds and what resize/auto-fit write.
   const getBaseColWidth = useCallback(
