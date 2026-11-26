@@ -23,7 +23,7 @@ export interface CellProps {
    */
   linkRequiresModifier?: boolean;
   isMerged?: boolean;
-  onCellClick: (row: number, col: number) => void;
+  onCellClick: (row: number, col: number, e?: React.MouseEvent) => void;
   onCellMouseDown: (e: MouseEvent, row: number, col: number) => void;
   onCellMouseEnter: (e: MouseEvent, row: number, col: number) => void;
   onCellDoubleClick?: (row: number, col: number) => void;
@@ -201,7 +201,7 @@ const Cell = memo(function Cell({
       className={className}
       style={mergedStyle}
       data-cell={`${rowIndex},${columnIndex}`}
-      onClick={() => onCellClick(rowIndex, columnIndex)}
+      onClick={(e) => onCellClick(rowIndex, columnIndex, e)}
       onMouseDown={(e) => onCellMouseDown(e, rowIndex, columnIndex)}
       onMouseEnter={(e) => onCellMouseEnter(e, rowIndex, columnIndex)}
       onDoubleClick={() => onCellDoubleClick?.(rowIndex, columnIndex)}

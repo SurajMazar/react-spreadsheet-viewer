@@ -416,8 +416,14 @@ export default function VirtualGrid({
     };
   }, [gridApiRef, scrollSelectionIntoView]);
 
+  // The far corner of a Shift-extended selection; the active cell is its anchor.
+  const selectionFocus = useRef<{ row: number; col: number } | null>(null);
+
   const onCellClick = useCallback(
-    (row: number, col: number) => {
+    (row: number, col: number, e?: React.MouseEvent) => {
+      // Shift+click was handled on mouse down: it extends the selection.
+      if (e?.shiftKey && selectionFocus.current) return;
+      selectionFocus.current = null;
       setEditingCell(null);
       setProgrammaticHighlight(false);
       setActiveCell(row, col);
@@ -450,6 +456,7 @@ export default function VirtualGrid({
   // Make (row, col) the active cell and the selection, as a keyboard move does.
   const moveActiveCellTo = useCallback(
     (row: number, col: number) => {
+      selectionFocus.current = null;
       setProgrammaticHighlight(false);
       setActiveCell(row, col);
       const label = `${colIndexToLetter(col)}${row + 1}`;
@@ -459,6 +466,28 @@ export default function VirtualGrid({
       }
     },
     [activeSheet, setActiveCell, setSelectionRanges, setProgrammaticHighlight]
+  );
+
+  // Select from the active cell to (row, col), as Shift+click and Shift+arrows
+  // do in a spreadsheet. The active cell stays where it is.
+  const extendSelectionTo = useCallback(
+    (row: number, col: number) => {
+      if (!activeCell || !activeSheet) return;
+      const range = {
+        startRow: Math.min(activeCell.row, row),
+        startCol: Math.min(activeCell.col, col),
+        endRow: Math.max(activeCell.row, row),
+        endCol: Math.max(activeCell.col, col),
+      };
+      const label = `${colIndexToLetter(range.startCol)}${range.startRow + 1}:${colIndexToLetter(range.endCol)}${range.endRow + 1}`;
+      selectionFocus.current = { row, col };
+      setProgrammaticHighlight(false);
+      setSelectionRanges(activeSheet, [range], label);
+      setRangeInput(activeSheet, label);
+      if (row >= frozenRowCount) rowVirtualizerRef.current.scrollToIndex(row, { align: 'auto' });
+      if (col >= frozenColCount) colVirtualizerRef.current.scrollToIndex(col, { align: 'auto' });
+    },
+    [activeCell, activeSheet, setSelectionRanges, setRangeInput, setProgrammaticHighlight, frozenRowCount, frozenColCount]
   );
 
   const onEditCommit = useCallback(
@@ -491,10 +520,19 @@ export default function VirtualGrid({
     (e: MouseEvent, row: number, col: number) => {
       if (e.button !== 0) return;
       isSelecting.current = true;
+      if (e.shiftKey && activeCell) {
+        // Shift+click extends the selection from the active cell; a drag
+        // carries on from there.
+        e.preventDefault();
+        selectionStart.current = { row: activeCell.row, col: activeCell.col };
+        extendSelectionTo(row, col);
+        return;
+      }
+      selectionFocus.current = null;
       selectionStart.current = { row, col };
       setActiveCell(row, col);
     },
-    [setActiveCell]
+    [setActiveCell, activeCell, extendSelectionTo]
   );
 
   const onCellMouseEnter = useCallback(
@@ -535,6 +573,24 @@ export default function VirtualGrid({
 
       let newRow = activeCell.row;
       let newCol = activeCell.col;
+
+      // Shift+arrow grows or shrinks the selection from the active cell.
+      const ARROW_STEPS: Record<string, [number, number]> = {
+        ArrowUp: [-1, 0],
+        ArrowDown: [1, 0],
+        ArrowLeft: [0, -1],
+        ArrowRight: [0, 1],
+      };
+      const step = ARROW_STEPS[e.key];
+      if (step && e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey && keyboard.navigation) {
+        e.preventDefault();
+        const focus = selectionFocus.current ?? activeCell;
+        extendSelectionTo(
+          Math.min(effectiveRows - 1, Math.max(0, focus.row + step[0])),
+          Math.min(effectiveCols - 1, Math.max(0, focus.col + step[1]))
+        );
+        return;
+      }
 
       switch (e.key) {
         case 'ArrowUp':
@@ -613,7 +669,7 @@ export default function VirtualGrid({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activeCell, sheetData, moveActiveCellTo, effectiveRows, effectiveCols, dataRows, dataCols, canEdit, editingCell, keyboard]);
+  }, [activeCell, sheetData, moveActiveCellTo, extendSelectionTo, effectiveRows, effectiveCols, dataRows, dataCols, canEdit, editingCell, keyboard]);
 
   // Copy/Paste handlers (Ctrl+C / Ctrl+V / Cmd+C / Cmd+V) and Escape to clear copy indicator
   useEffect(() => {

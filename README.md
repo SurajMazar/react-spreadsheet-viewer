@@ -388,7 +388,7 @@ Customize the colors used to highlight search matches independently from the sel
 />
 ```
 
-Press Ctrl+F (Cmd+F) to open search. Matches are shown with a dedicated highlight that does **not** interfere with the user's cell selection.
+Press Ctrl+F (Cmd+F) to open search; the search box takes focus at once, so what you type next goes into it. Matches are shown with a dedicated highlight that does **not** interfere with the user's cell selection.
 
 **Priority:** Search match highlights always take precedence over the range selection highlight — if a cell is both selected and a search match, the search color wins.
 
@@ -562,6 +562,10 @@ and left, and Escape cancels. Clicking away saves and stays on the cell. On a
 selected cell that is not being edited, Enter and Shift+Enter move down and up,
 as in Excel.
 
+Shift+click a cell, or press Shift with the arrow keys, to select from the
+active cell to there. The active cell stays where it is; a plain click or arrow
+key collapses the selection again.
+
 ---
 
 ## Copy & Paste with Formatting
@@ -623,7 +627,7 @@ Pass an object to disable individual groups and leave the rest working:
 
 | Group | Default | Keys |
 | --- | --- | --- |
-| `navigation` | `true` | Arrow keys, Tab / Shift+Tab, Enter / Shift+Enter, Home, End, and the move after Enter or Tab saves an edit — plus everything the browser would do by itself, see below |
+| `navigation` | `true` | Arrow keys, Shift+arrows to extend the selection, Tab / Shift+Tab, Enter / Shift+Enter, Home, End, and the move after Enter or Tab saves an edit — plus everything the browser would do by itself, see below |
 | `editing` | `true` | F2, typing on the selected cell, and Alt+Down on a list cell open the cell editor (edit mode only) |
 | `clipboard` | `true` | Ctrl/Cmd+C, Ctrl/Cmd+V, Escape to clear the copy marquee |
 | `history` | `true` | Ctrl/Cmd+Z, Ctrl/Cmd+Y, Ctrl/Cmd+Shift+Z |

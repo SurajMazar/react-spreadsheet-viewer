@@ -232,3 +232,58 @@ describe('SheetViewer — editing from the keyboard', () => {
     expect(activeCell()).toBe('1,1');
   });
 });
+
+describe('SheetViewer — extending the selection with Shift', () => {
+  const anchorCell = () =>
+    document.querySelector<HTMLElement>('.sv-cell.sv-cell-active, .sv-cell.sv-cell-active-in-range')?.dataset.cell;
+  const lastRanges = (fn: ReturnType<typeof vi.fn>) => fn.mock.calls[fn.mock.calls.length - 1]?.[0];
+
+  it('Shift+click selects from the active cell to the clicked cell', async () => {
+    const onSelectionChange = vi.fn();
+    await renderEditable({ onSelectionChange });
+    select(0, 0);
+    const target = cellAt(2, 1)!;
+    fireEvent.mouseDown(target, { shiftKey: true });
+    fireEvent.mouseUp(target, { shiftKey: true });
+    fireEvent.click(target, { shiftKey: true });
+
+    await waitFor(() =>
+      expect(lastRanges(onSelectionChange)).toEqual([{ startRow: 0, startCol: 0, endRow: 2, endCol: 1 }])
+    );
+    expect(anchorCell()).toBe('0,0');
+  });
+
+  it('Shift+arrows grow and shrink the selection from the active cell', async () => {
+    const onSelectionChange = vi.fn();
+    await renderEditable({ onSelectionChange });
+    select(1, 1);
+    press('ArrowDown', { shiftKey: true });
+    press('ArrowRight', { shiftKey: true });
+    await waitFor(() =>
+      expect(lastRanges(onSelectionChange)).toEqual([{ startRow: 1, startCol: 1, endRow: 2, endCol: 2 }])
+    );
+    press('ArrowUp', { shiftKey: true });
+    await waitFor(() =>
+      expect(lastRanges(onSelectionChange)).toEqual([{ startRow: 1, startCol: 1, endRow: 1, endCol: 2 }])
+    );
+    expect(anchorCell()).toBe('1,1');
+
+    // A plain arrow collapses it again.
+    press('ArrowLeft');
+    await waitFor(() =>
+      expect(lastRanges(onSelectionChange)).toEqual([{ startRow: 1, startCol: 0, endRow: 1, endCol: 0 }])
+    );
+  });
+
+  it('typing right after Cmd+F goes into the search box, not the selected cell', async () => {
+    const { ref } = await renderEditable({ searchable: true });
+    select(2, 0);
+    press('f', { metaKey: true });
+    const search = document.activeElement as HTMLInputElement;
+    expect(search.tagName).toBe('INPUT');
+    press('R');
+
+    expect(editor()).toBeNull();
+    expect(ref.current!.getCellRangeData('A3')).toEqual([['Rent']]);
+  });
+});

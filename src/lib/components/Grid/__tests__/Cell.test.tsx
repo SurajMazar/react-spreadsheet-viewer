@@ -260,7 +260,7 @@ describe('Cell — Event handlers', () => {
     const onCellClick = vi.fn();
     const { container } = renderCell({ rowIndex: 3, columnIndex: 5, onCellClick });
     fireEvent.click(container.firstElementChild!);
-    expect(onCellClick).toHaveBeenCalledWith(3, 5);
+    expect(onCellClick).toHaveBeenCalledWith(3, 5, expect.anything());
   });
 
   it('calls onCellMouseDown with event, row, and col on mouseDown', () => {
@@ -433,7 +433,7 @@ describe('Cell — Hyperlinks', () => {
     const plain = new MouseEvent('click', { bubbles: true, cancelable: true });
     link.dispatchEvent(plain);
     expect(plain.defaultPrevented).toBe(true);
-    expect(onCellClick).toHaveBeenCalledWith(0, 0);
+    expect(onCellClick).toHaveBeenCalledWith(0, 0, expect.anything());
 
     const withCtrl = new MouseEvent('click', { bubbles: true, cancelable: true, ctrlKey: true });
     link.dispatchEvent(withCtrl);

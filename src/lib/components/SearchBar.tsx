@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useEffect, useRef, type KeyboardEvent } from 'react';
+import { flushSync } from 'react-dom';
 import { useViewerStore } from '../context/ViewerContext';
 import { colIndexToLetter } from '../utils/rangeParser';
 
@@ -43,8 +44,10 @@ export default function SearchBar({ shortcutsEnabled = true }: SearchBarProps) {
     const handleKeyDown = (e: globalThis.KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
         e.preventDefault();
-        setIsOpen(true);
-        setTimeout(() => inputRef.current?.focus(), 50);
+        // Render the bar now and focus it before the next key arrives, so
+        // what is typed goes into the search box, not the selected cell.
+        flushSync(() => setIsOpen(true));
+        inputRef.current?.focus();
       }
       if (e.key === 'Escape' && isOpen) {
         clearSearch();
