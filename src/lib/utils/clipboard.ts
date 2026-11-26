@@ -369,3 +369,23 @@ export async function pasteFromClipboard(): Promise<{
     return null;
   }
 }
+
+/**
+ * Read a paste event's clipboard data, preferring HTML (with styles) over
+ * plain TSV. A paste event carries the data with it, so this needs no
+ * clipboard permission and runs at once.
+ */
+export function readClipboardData(data: DataTransfer | null | undefined): {
+  values: CellValue[][];
+  styles?: (CellStyle | undefined)[][];
+} | null {
+  if (!data) return null;
+  const html = data.getData('text/html');
+  if (html) {
+    const parsed = htmlToCells(html);
+    if (parsed.values.length > 0) return { values: parsed.values, styles: parsed.styles };
+  }
+  const text = data.getData('text/plain');
+  if (!text) return null;
+  return { values: tsvToCells(text) };
+}

@@ -198,6 +198,22 @@ export function tokenize(formula: string): Token[] {
       continue;
     }
 
+    // A template placeholder passed as a whole argument, such as
+    // `=LOOKUP(G5, "a", "b", <<DB_TABLE>>)`: read as the string it spells,
+    // so the formula evaluates and shows as written. Only after "(" or ",",
+    // so a comparison such as A1<B1 is never one.
+    if (ch === '<') {
+      const prev = tokens[tokens.length - 1];
+      if (prev && (prev.type === 'LPAREN' || prev.type === 'COMMA')) {
+        const placeholder = /^<<?[A-Za-z_][A-Za-z0-9_]*>>?(?=\s*[,)])/.exec(src.slice(i));
+        if (placeholder) {
+          tokens.push({ type: 'STRING', value: placeholder[0] });
+          i += placeholder[0].length;
+          continue;
+        }
+      }
+    }
+
     // Comparison operators
     if (ch === '<') {
       if (i + 1 < src.length && src[i + 1] === '>') {

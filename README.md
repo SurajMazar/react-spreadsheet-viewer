@@ -388,7 +388,7 @@ Customize the colors used to highlight search matches independently from the sel
 />
 ```
 
-Press Ctrl+F (Cmd+F) to open search; the search box takes focus at once, so what you type next goes into it. Matches are shown with a dedicated highlight that does **not** interfere with the user's cell selection.
+Press Ctrl+F (Cmd+F) to open search; the search box takes focus at once, so what you type next goes into it. Enter and Shift+Enter step through the matches, and each one is selected, so the name box and formula bar show it. Matches are shown with a dedicated highlight.
 
 **Priority:** Search match highlights always take precedence over the range selection highlight — if a cell is both selected and a search match, the search color wins.
 
@@ -571,7 +571,7 @@ key collapses the selection again.
 ## Copy & Paste with Formatting
 
 - **Ctrl+C** (Cmd+C on Mac) — copies the selected range as HTML (with inline styles) and TSV
-- **Ctrl+V** (Cmd+V on Mac) — pastes HTML (preferred, preserves styles) or plain TSV
+- **Ctrl+V** (Cmd+V on Mac) — pastes HTML (preferred, preserves styles) or plain TSV, from the browser's paste event: no clipboard permission prompt, and the paste lands at once in the selected cell
 - **Escape** — clears the marching ants copy indicator
 
 Paste requires `mode="edit"`.
@@ -987,6 +987,8 @@ Parse and evaluate Excel-style formulas. 24 built-in functions:
 | Lookup | `VLOOKUP`, `HLOOKUP`, `INDEX`, `MATCH` |
 
 Formulas are evaluated for sheets given through `data`, and for cells a user types `=…` into in edit mode (the formula bar then shows the formula, the cell its result). Formulas in loaded `.xlsx` files are not re-evaluated: those cells show the value the file cached. Add your own functions with `customFunctions`; a custom function with a built-in's name replaces it.
+
+A template placeholder passed as a whole argument, such as `<<DB_TABLE>>` or `<DB_TABLE>` in `=LOOKUP(G5, "a", "b", <<DB_TABLE>>)`, is read as the text it spells, so the formula evaluates and the formula bar shows it as written. Only a whole argument counts: `A1<B1` is still a comparison.
 
 ---
 

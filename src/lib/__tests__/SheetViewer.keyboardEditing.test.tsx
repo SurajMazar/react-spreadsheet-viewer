@@ -287,3 +287,57 @@ describe('SheetViewer — extending the selection with Shift', () => {
     expect(ref.current!.getCellRangeData('A3')).toEqual([['Rent']]);
   });
 });
+
+describe('SheetViewer — paste and search', () => {
+  function pasteText(text: string, html = '') {
+    const event = new Event('paste', { bubbles: true, cancelable: true }) as ClipboardEvent;
+    Object.defineProperty(event, 'clipboardData', {
+      value: { getData: (type: string) => (type === 'text/html' ? html : type === 'text/plain' ? text : '') },
+    });
+    act(() => {
+      document.body.dispatchEvent(event);
+    });
+    return event;
+  }
+
+  it('pastes from the paste event at once, into the selected cell, with no clipboard prompt', async () => {
+    const read = vi.fn();
+    vi.stubGlobal('navigator', { ...navigator, clipboard: { read, readText: read } });
+    const { ref } = await renderEditable();
+    select(1, 1);
+    const event = pasteText('300\t400');
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(read).not.toHaveBeenCalled();
+    expect(ref.current!.getCellRangeData('B2:C2')).toEqual([[300, 400]]);
+
+    // One undo takes the whole paste back.
+    press('z', { ctrlKey: true });
+    expect(ref.current!.getCellRangeData('B2')).toEqual([[100]]);
+  });
+
+  it('leaves a paste into another input alone', async () => {
+    const { ref } = await renderEditable({ searchable: true });
+    select(1, 1);
+    press('f', { metaKey: true });
+    const event = new Event('paste', { bubbles: true, cancelable: true }) as ClipboardEvent;
+    Object.defineProperty(event, 'clipboardData', { value: { getData: () => '999' } });
+    act(() => {
+      document.activeElement!.dispatchEvent(event);
+    });
+    expect(event.defaultPrevented).toBe(false);
+    expect(ref.current!.getCellRangeData('B2')).toEqual([[100]]);
+  });
+
+  it('a search jump selects the match, so the name box shows its address', async () => {
+    await renderEditable({ searchable: true });
+    select(0, 0);
+    press('f', { metaKey: true });
+    const search = document.activeElement as HTMLInputElement;
+    fireEvent.change(search, { target: { value: 'Rent' } });
+
+    await waitFor(() =>
+      expect(document.querySelector<HTMLInputElement>('.sv-formula-bar-range-input')?.value).toBe('A3')
+    );
+  });
+});
