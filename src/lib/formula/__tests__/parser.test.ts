@@ -353,3 +353,22 @@ describe('parseFormula', () => {
     expect(ast.kind).toBe('error');
   });
 });
+
+describe('placeholder arguments', () => {
+  it('reads <<NAME>> and <NAME> as strings when they are a whole argument', () => {
+    expect(tokenize('=LOOKUP(G5, "a", "b", <<DB_TABLE>>)')).toContainEqual({ type: 'STRING', value: '<<DB_TABLE>>' });
+    expect(tokenize('=LOOKUP(G5, "a", "b", <DB_TABLE>)')).toContainEqual({ type: 'STRING', value: '<DB_TABLE>' });
+    expect(tokenize('=F(<<X>>, 1)')).toContainEqual({ type: 'STRING', value: '<<X>>' });
+  });
+
+  it('keeps < as a comparison everywhere else', () => {
+    expect(tokenize('=IF(A1<B1, 1, 2)')).toContainEqual({ type: 'OPERATOR', value: '<' });
+    expect(tokenize('=IF(A1<B1,C1>D1)').filter((t) => t.type === 'STRING')).toEqual([]);
+    expect(tokenize('=A1<>B1')).toContainEqual({ type: 'OPERATOR', value: '<>' });
+  });
+
+  it('parses a COA lookup with a placeholder without an error', () => {
+    const ast = parseFormula('=LOOKUP(G5, "coa_subcategory2", "coa_category", <<DB_TABLE>>)');
+    expect(ast.kind).toBe('functionCall');
+  });
+});

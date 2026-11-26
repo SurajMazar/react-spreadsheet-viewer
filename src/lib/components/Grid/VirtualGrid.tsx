@@ -5,7 +5,7 @@ import { colIndexToLetter, isCellInRanges, unionRanges } from '../../utils/range
 import { getRangeBox, getScrollToReveal } from '../../utils/gridGeometry';
 import { scaleToZoom } from '../../utils/zoom';
 import { computeAutoFitWidth, createCanvasTextMeasurer, resolveAutoFitFont } from '../../utils/autoFit';
-import { extractCellsFromRange, extractStylesFromRange, copyRangeToClipboard, pasteFromClipboard } from '../../utils/clipboard';
+import { extractCellsFromRange, extractStylesFromRange, copyRangeToClipboard, readClipboardData } from '../../utils/clipboard';
 import Cell from './Cell';
 import EditableCell, { type CommitMove } from './EditableCell';
 import { stepCell } from './stepCell';
@@ -727,40 +727,52 @@ export default function VirtualGrid({
         }
       }
 
-      if (e.key === 'v' && canEdit && activeCell && activeSheet) {
-        e.preventDefault();
-        setCopiedRange(null);
-        pasteFromClipboard().then((result) => {
-          if (!result || result.values.length === 0) return;
-          const { values, styles: pastedStyles } = result;
-          const cellChanges: CellValueChange[] = [];
-          const styleChanges: CellStyleChange[] = [];
+      // Ctrl/Cmd+V is left to the browser: it fires a paste event, handled
+      // below, which carries the clipboard data without a permission prompt.
+    };
 
-          for (let r = 0; r < values.length; r++) {
-            for (let c = 0; c < values[r].length; c++) {
-              const targetRow = activeCell.row + r;
-              const targetCol = activeCell.col + c;
+    // Paste: the event carries the clipboard data, so it applies at once to
+    // the cell selected when the keys were pressed.
+    const handlePaste = (e: ClipboardEvent) => {
+      if (!keyboard.clipboard || !sheetData || !canEdit || !activeCell || !activeSheet) return;
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
+      if (editingCell) return;
+      const result = readClipboardData(e.clipboardData);
+      if (!result || result.values.length === 0) return;
+      e.preventDefault();
+      setCopiedRange(null);
+      const { values, styles: pastedStyles } = result;
+      const cellChanges: CellValueChange[] = [];
+      const styleChanges: CellStyleChange[] = [];
 
-              const oldValue = sheetData ? getCellInputValue(sheetData, targetRow, targetCol) : null;
-              cellChanges.push({ row: targetRow, col: targetCol, oldValue, newValue: values[r][c] });
-              setCellValue(activeSheet, targetRow, targetCol, values[r][c]);
+      for (let r = 0; r < values.length; r++) {
+        for (let c = 0; c < values[r].length; c++) {
+          const targetRow = activeCell.row + r;
+          const targetCol = activeCell.col + c;
 
-              const pastedStyle = pastedStyles?.[r]?.[c];
-              if (pastedStyle) {
-                const oldStyle = sheetData?.styles?.[`${targetRow},${targetCol}`];
-                styleChanges.push({ row: targetRow, col: targetCol, oldStyle, newStyle: pastedStyle });
-                setCellStyle(activeSheet, targetRow, targetCol, pastedStyle);
-              }
-            }
+          const oldValue = getCellInputValue(sheetData, targetRow, targetCol);
+          cellChanges.push({ row: targetRow, col: targetCol, oldValue, newValue: values[r][c] });
+          setCellValue(activeSheet, targetRow, targetCol, values[r][c]);
+
+          const pastedStyle = pastedStyles?.[r]?.[c];
+          if (pastedStyle) {
+            const oldStyle = sheetData.styles?.[`${targetRow},${targetCol}`];
+            styleChanges.push({ row: targetRow, col: targetCol, oldStyle, newStyle: pastedStyle });
+            setCellStyle(activeSheet, targetRow, targetCol, pastedStyle);
           }
-
-          pushUndo({ sheetName: activeSheet, cellChanges, styleChanges });
-        });
+        }
       }
+
+      pushUndo({ sheetName: activeSheet, cellChanges, styleChanges });
     };
 
     window.addEventListener('keydown', handleCopyPaste);
-    return () => window.removeEventListener('keydown', handleCopyPaste);
+    window.addEventListener('paste', handlePaste);
+    return () => {
+      window.removeEventListener('keydown', handleCopyPaste);
+      window.removeEventListener('paste', handlePaste);
+    };
   }, [sheetData, activeCell, ranges, canEdit, activeSheet, editingCell, setCellValue, setCellStyle, setCopiedRange, pushUndo, undo, redo, keyboard]);
 
   // Build a merge lookup map: "row,col" → MergeCell for quick cell-level checks

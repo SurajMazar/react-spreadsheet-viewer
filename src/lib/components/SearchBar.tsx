@@ -27,6 +27,8 @@ export default function SearchBar({ shortcutsEnabled = true }: SearchBarProps) {
   const activeSheet = useViewerStore((s) => s.activeSheet);
   const sheetData = useViewerStore((s) => (s.activeSheet ? s.sheets[s.activeSheet] : null));
   const setActiveCell = useViewerStore((s) => s.setActiveCell);
+  const setSelectionRanges = useViewerStore((s) => s.setSelectionRanges);
+  const setRangeInput = useViewerStore((s) => s.setRangeInput);
   const setSearchMatches = useViewerStore((s) => s.setSearchMatches);
   const setSearchActiveIndex = useViewerStore((s) => s.setSearchActiveIndex);
 
@@ -60,11 +62,15 @@ export default function SearchBar({ shortcutsEnabled = true }: SearchBarProps) {
   const navigateToResult = useCallback(
     (result: SearchResult | undefined, idx: number) => {
       if (!result || !activeSheet) return;
-      // Only scroll to the cell; do NOT change the user's selection ranges
+      // Select the match, as Find does in a spreadsheet, so the name box and
+      // the formula bar show it.
+      const label = `${colIndexToLetter(result.col)}${result.row + 1}`;
       setActiveCell(result.row, result.col);
+      setSelectionRanges(activeSheet, [{ startRow: result.row, startCol: result.col, endRow: result.row, endCol: result.col }], label);
+      setRangeInput(activeSheet, label);
       setSearchActiveIndex(idx);
     },
-    [activeSheet, setActiveCell, setSearchActiveIndex]
+    [activeSheet, setActiveCell, setSelectionRanges, setRangeInput, setSearchActiveIndex]
   );
 
   const handleSearch = useCallback(
