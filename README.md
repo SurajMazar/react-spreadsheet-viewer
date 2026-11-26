@@ -562,6 +562,10 @@ and left, and Escape cancels. Clicking away saves and stays on the cell. On a
 selected cell that is not being edited, Enter and Shift+Enter move down and up,
 as in Excel.
 
+Type a cell or range into the name box and press Enter to go there: the range
+is selected, its first cell becomes the active cell (the formula bar shows it),
+the grid scrolls to it, and the arrow keys carry on from there.
+
 The grid always leaves room to type past the data: at least 50 blank rows under
 it (100 rows in all) and 5 blank columns beside it.
 

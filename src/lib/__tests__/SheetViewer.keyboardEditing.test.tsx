@@ -342,3 +342,33 @@ describe('SheetViewer — paste and search', () => {
   });
 });
 
+
+describe('SheetViewer — the name box', () => {
+  function goTo(address: string) {
+    const nameBox = document.querySelector<HTMLInputElement>('.sv-formula-bar-range-input')!;
+    fireEvent.change(nameBox, { target: { value: address } });
+    fireEvent.submit(nameBox.closest('form')!);
+  }
+  const anchor = () =>
+    document.querySelector<HTMLElement>('.sv-cell.sv-cell-active, .sv-cell.sv-cell-active-in-range')?.dataset.cell;
+
+  it('going to a range selects it and makes its first cell the active cell', async () => {
+    const onSelectionChange = vi.fn();
+    await renderEditable({ onSelectionChange });
+    select(0, 0);
+    goTo('B2:C3');
+    await waitFor(() =>
+      expect(onSelectionChange.mock.calls[onSelectionChange.mock.calls.length - 1]?.[0]).toEqual([{ startRow: 1, startCol: 1, endRow: 2, endCol: 2 }])
+    );
+    expect(anchor()).toBe('1,1');
+  });
+
+  it('going to a cell selects it, and the arrow keys carry on from there', async () => {
+    await renderEditable();
+    select(0, 0);
+    goTo('C3');
+    await waitFor(() => expect(anchor()).toBe('2,2'));
+    press('ArrowUp');
+    expect(anchor()).toBe('1,2');
+  });
+});
